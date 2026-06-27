@@ -21,4 +21,15 @@ describe("getProblems", () => {
       new ApiError(503, "backend_unavailable", "service unavailable"),
     );
   });
+
+  it("rejects malformed successful responses", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("not json", {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    })));
+
+    await expect(getProblems()).rejects.toEqual(
+      new ApiError(200, "invalid_response", "API returned an invalid JSON response"),
+    );
+  });
 });

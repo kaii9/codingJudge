@@ -13,7 +13,16 @@ export class ApiError extends Error {
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, init);
-  const payload = await response.json().catch(() => null);
+  const payload = await response.json().catch(() => {
+    if (response.ok) {
+      throw new ApiError(
+        response.status,
+        "invalid_response",
+        "API returned an invalid JSON response",
+      );
+    }
+    return null;
+  });
   if (!response.ok) {
     const body = payload as { error?: { code?: string; message?: string } } | null;
     throw new ApiError(
