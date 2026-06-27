@@ -11,10 +11,13 @@ describe("judge helpers", () => {
   it("uses a problem/language-specific draft key", () => {
     expect(draftKey("sum", "python")).toBe("gojudge:draft:sum:python");
   });
-  it("provides runnable starter templates", () => {
+  it("provides language entrypoints and A+B starter content", () => {
     expect(starterTemplate("go")).toContain("package main");
+    expect(starterTemplate("go")).toContain("fmt.Println(a + b)");
     expect(starterTemplate("cpp")).toContain("#include <iostream>");
+    expect(starterTemplate("cpp")).toContain("std::cout << a + b");
     expect(starterTemplate("python")).toContain("def main");
+    expect(starterTemplate("python")).toContain("print(a + b)");
   });
   it.each([
     ["queued", "Queued", "neutral"],

@@ -12,11 +12,17 @@ export const statusMeta: Record<SubmissionStatus, { label: string; variant: Stat
   internal_error: { label: "Internal Error", variant: "danger" },
 };
 
-const terminalStatuses = new Set<SubmissionStatus>([
-  "accepted", "wrong_answer", "runtime_error", "time_limit_exceeded", "internal_error",
-]);
+const terminalStatus: Record<SubmissionStatus, boolean> = {
+  queued: false,
+  running: false,
+  accepted: true,
+  wrong_answer: true,
+  runtime_error: true,
+  time_limit_exceeded: true,
+  internal_error: true,
+};
 
-export const isTerminalStatus = (status: SubmissionStatus) => terminalStatuses.has(status);
+export const isTerminalStatus = (status: SubmissionStatus) => terminalStatus[status];
 export const draftKey = (problemId: string, language: Language) => `gojudge:draft:${problemId}:${language}`;
 
 const templates: Record<Language, string> = {
