@@ -1,0 +1,7 @@
+.cache/
+.history/
+.git/
+.DS_Store
+**/.DS_Store
+bin/
+coverage.out

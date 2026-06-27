@@ -1,0 +1,231 @@
+openapi: 3.0.3
+info:
+  title: GoJudge API
+  version: 0.1.0
+  description: MVP API for problem listing, code submission, and asynchronous judge results.
+paths:
+  /healthz:
+    get:
+      summary: Health check
+      responses:
+        "200":
+          description: API is healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: ok
+  /problems:
+    get:
+      summary: List problems
+      responses:
+        "200":
+          description: Problem list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Problem"
+  /problems/{id}:
+    get:
+      summary: Get problem detail
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Problem detail without hidden test cases
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "404":
+          description: Problem not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /submissions:
+    get:
+      summary: List submission history
+      responses:
+        "200":
+          description: Submission history ordered by latest update
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Submission"
+    post:
+      summary: Create a code submission
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateSubmissionRequest"
+      responses:
+        "202":
+          description: Submission accepted and queued
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Submission"
+        "400":
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Problem not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /submissions/{id}:
+    get:
+      summary: Get submission result
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Submission status and result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Submission"
+        "404":
+          description: Submission not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+components:
+  schemas:
+    CreateSubmissionRequest:
+      type: object
+      required:
+        - problemId
+        - language
+        - code
+      properties:
+        problemId:
+          type: string
+          example: sum
+        language:
+          type: string
+          enum:
+            - go
+            - cpp
+            - python
+        code:
+          type: string
+          maxLength: 65536
+    Submission:
+      type: object
+      required:
+        - id
+        - problemId
+        - language
+        - status
+        - createdAt
+        - updatedAt
+      properties:
+        id:
+          type: string
+        problemId:
+          type: string
+        language:
+          type: string
+          enum:
+            - go
+            - cpp
+            - python
+        status:
+          type: string
+          enum:
+            - queued
+            - running
+            - accepted
+            - wrong_answer
+            - runtime_error
+            - time_limit_exceeded
+            - internal_error
+        result:
+          $ref: "#/components/schemas/JudgeResult"
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+    Problem:
+      type: object
+      required:
+        - id
+        - title
+        - description
+        - language
+        - timeLimitMs
+        - memoryLimitMb
+      properties:
+        id:
+          type: string
+        title:
+          type: string
+        description:
+          type: string
+        language:
+          type: string
+          enum: [go, cpp, python]
+        timeLimitMs:
+          type: integer
+          minimum: 1
+        memoryLimitMb:
+          type: integer
+          minimum: 1
+    JudgeResult:
+      type: object
+      required:
+        - status
+      properties:
+        status:
+          type: string
+          enum: [accepted, wrong_answer, runtime_error, time_limit_exceeded, internal_error]
+        stdout:
+          type: string
+        stderr:
+          type: string
+        exitCode:
+          type: integer
+        durationMs:
+          type: integer
+          format: int64
+    Error:
+      type: object
+      required:
+        - error
+      properties:
+        error:
+          type: object
+          required:
+            - code
+            - message
+          properties:
+            code:
+              type: string
+            message:
+              type: string
