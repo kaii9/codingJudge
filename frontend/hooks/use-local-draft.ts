@@ -20,28 +20,42 @@ function writeDraft(key: string, code: string) {
   }
 }
 
+function latestDraft(drafts: Map<string, string>, key: string, language: Language) {
+  if (drafts.has(key)) return drafts.get(key)!;
+  const code = readDraft(key, language);
+  drafts.set(key, code);
+  return code;
+}
+
 export function useLocalDraft(problemId: string, language: Language) {
   const key = draftKey(problemId, language);
-  const [code, setCodeState] = useState(() => starterTemplate(language));
-  const activeKeyRef = useRef(key);
-  const codeRef = useRef(code);
+  const [visibleDraft, setVisibleDraft] = useState(() => ({
+    key,
+    code: starterTemplate(language),
+  }));
+  const latestCodeByKeyRef = useRef(new Map<string, string>());
+
+  if (visibleDraft.key !== key) {
+    setVisibleDraft({ key, code: starterTemplate(language) });
+  }
 
   useEffect(() => {
-    const restoredCode = readDraft(key, language);
-    activeKeyRef.current = key;
-    codeRef.current = restoredCode;
-    // Key changes intentionally hydrate local state from the corresponding draft.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setCodeState(restoredCode);
+    const restoredCode = latestDraft(latestCodeByKeyRef.current, key, language);
+    setVisibleDraft(current => current.key === key
+      ? { key, code: restoredCode }
+      : current);
   }, [key, language]);
 
   const setCode = useCallback((value: SetStateAction<string>) => {
-    const activeKey = activeKeyRef.current;
-    const nextCode = typeof value === "function" ? value(codeRef.current) : value;
-    codeRef.current = nextCode;
-    writeDraft(activeKey, nextCode);
-    setCodeState(nextCode);
-  }, []);
+    const nextCode = typeof value === "function"
+      ? value(latestDraft(latestCodeByKeyRef.current, key, language))
+      : value;
+    latestCodeByKeyRef.current.set(key, nextCode);
+    writeDraft(key, nextCode);
+    setVisibleDraft(current => current.key === key
+      ? { key, code: nextCode }
+      : current);
+  }, [key, language]);
 
-  return { code, setCode };
+  return { code: visibleDraft.code, setCode };
 }
