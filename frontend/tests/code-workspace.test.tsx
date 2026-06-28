@@ -10,6 +10,7 @@ interface MonacoProps {
   language?: string;
   onChange?: (value?: string) => void;
   options?: Record<string, unknown>;
+  path?: string;
   theme?: string;
   value?: string;
 }
@@ -126,6 +127,35 @@ it("keeps independent language drafts", async () => {
   expect(screen.getByLabelText("Code editor")).toHaveValue("print(3)");
 });
 
+it("uses stable collision-safe Monaco model paths for each problem and language", async () => {
+  const user = userEvent.setup();
+  const view = render(
+    <CodeWorkspace problemId="arrays/two words" submitting={false} onSubmit={vi.fn()} />,
+  );
+
+  const firstGoPath = latestMonacoProps().path;
+  expect(firstGoPath).toMatch(/\.go$/);
+  expect(firstGoPath).not.toContain("arrays/two words");
+
+  await user.selectOptions(screen.getByLabelText("Language"), "python");
+  const firstPythonPath = latestMonacoProps().path;
+  expect(firstPythonPath).toMatch(/\.py$/);
+  expect(firstPythonPath).not.toBe(firstGoPath);
+
+  await user.selectOptions(screen.getByLabelText("Language"), "go");
+  expect(latestMonacoProps().path).toBe(firstGoPath);
+
+  view.rerender(
+    <CodeWorkspace problemId="arrays%2Ftwo words" submitting={false} onSubmit={vi.fn()} />,
+  );
+  expect(latestMonacoProps().path).not.toBe(firstGoPath);
+
+  view.rerender(
+    <CodeWorkspace problemId="arrays/two words" submitting={false} onSubmit={vi.fn()} />,
+  );
+  expect(latestMonacoProps().path).toBe(firstGoPath);
+});
+
 it("keeps problem drafts independent when a stale editor callback fires", () => {
   const view = render(
     <CodeWorkspace problemId="sum" submitting={false} onSubmit={vi.fn()} />,
@@ -170,8 +200,7 @@ it("submits the active source verbatim and preserves it after completion", async
   expect(screen.getByLabelText("Code editor")).toHaveValue(source);
 });
 
-it("does not dispatch duplicate submissions while the callback is pending", async () => {
-  const user = userEvent.setup();
+it("renders pending state immediately and dispatches rapid clicks only once", async () => {
   let finishSubmission: (() => void) | undefined;
   const onSubmit = vi.fn(() => new Promise<void>(resolve => {
     finishSubmission = resolve;
@@ -180,12 +209,58 @@ it("does not dispatch duplicate submissions while the callback is pending", asyn
   fireEvent.change(screen.getByLabelText("Code editor"), { target: { value: "package main" } });
 
   const submit = screen.getByRole("button", { name: "Submit" });
-  await user.click(submit);
-  await user.click(submit);
+  act(() => {
+    submit.click();
+    submit.click();
+  });
+
   expect(onSubmit).toHaveBeenCalledTimes(1);
+  expect(screen.getByRole("button", { name: "Submitting..." })).toBeDisabled();
+  expect(screen.getByRole("button", { name: "Submitting..." })).toHaveAttribute("aria-busy", "true");
 
   await act(async () => finishSubmission?.());
+  expect(screen.getByRole("button", { name: "Submit" })).toBeEnabled();
+  expect(screen.getByRole("button", { name: "Submit" })).toHaveAttribute("aria-busy", "false");
   expect(screen.getByLabelText("Code editor")).toHaveValue("package main");
+});
+
+it("handles a rejected callback and preserves the source", async () => {
+  let rejectSubmission: ((reason: Error) => void) | undefined;
+  const onSubmit = vi.fn(() => new Promise<void>((_resolve, reject) => {
+    rejectSubmission = reject;
+  }));
+  render(<CodeWorkspace problemId="sum" submitting={false} onSubmit={onSubmit} />);
+  const source = "  package main\n";
+  fireEvent.change(screen.getByLabelText("Code editor"), { target: { value: source } });
+
+  act(() => screen.getByRole("button", { name: "Submit" }).click());
+  expect(screen.getByRole("button", { name: "Submitting..." })).toBeDisabled();
+
+  await act(async () => rejectSubmission?.(new Error("request failed")));
+
+  expect(screen.getByRole("button", { name: "Submit" })).toBeEnabled();
+  expect(screen.getByRole("button", { name: "Submit" })).toHaveAttribute("aria-busy", "false");
+  expect(screen.getByLabelText("Code editor")).toHaveValue(source);
+});
+
+it("stays busy after local completion while the parent is submitting", async () => {
+  let finishSubmission: (() => void) | undefined;
+  const onSubmit = vi.fn(() => new Promise<void>(resolve => {
+    finishSubmission = resolve;
+  }));
+  const view = render(
+    <CodeWorkspace problemId="sum" submitting={false} onSubmit={onSubmit} />,
+  );
+  fireEvent.change(screen.getByLabelText("Code editor"), { target: { value: "package main" } });
+  act(() => screen.getByRole("button", { name: "Submit" }).click());
+
+  view.rerender(<CodeWorkspace problemId="sum" submitting onSubmit={onSubmit} />);
+  await act(async () => finishSubmission?.());
+  expect(screen.getByRole("button", { name: "Submitting..." })).toBeDisabled();
+  expect(screen.getByRole("button", { name: "Submitting..." })).toHaveAttribute("aria-busy", "true");
+
+  view.rerender(<CodeWorkspace problemId="sum" submitting={false} onSubmit={onSubmit} />);
+  expect(screen.getByRole("button", { name: "Submit" })).toBeEnabled();
 });
 
 it("disables submission only for blank source or a parent submission", () => {

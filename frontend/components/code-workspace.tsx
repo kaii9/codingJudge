@@ -27,6 +27,22 @@ const monacoLanguage: Record<Language, string> = {
   python: "python",
 };
 
+const fileExtension: Record<Language, string> = {
+  go: "go",
+  cpp: "cpp",
+  python: "py",
+};
+
+function encodeModelSegment(value: string) {
+  return encodeURIComponent(value).replace(/[.!'()*]/g, character =>
+    `%${character.charCodeAt(0).toString(16).toUpperCase()}`,
+  );
+}
+
+function editorModelPath(problemId: string, language: Language) {
+  return `gojudge://draft/${encodeModelSegment(problemId)}/main.${fileExtension[language]}`;
+}
+
 const editorOptions = {
   accessibilitySupport: "auto",
   ariaLabel: "Code editor",
@@ -91,9 +107,11 @@ const MonacoEditor = dynamic(
 
 export function CodeWorkspace({ problemId, submitting, onSubmit }: CodeWorkspaceProps) {
   const [language, setLanguage] = useState<Language>("go");
+  const [locallySubmitting, setLocallySubmitting] = useState(false);
   const { code, setCode } = useLocalDraft(problemId, language);
   const submissionInFlightRef = useRef(false);
-  const submitDisabled = submitting || code.trim().length === 0;
+  const isSubmitting = submitting || locallySubmitting;
+  const submitDisabled = isSubmitting || code.trim().length === 0;
 
   const handleEditorChange = useCallback((value?: string) => {
     if (value !== undefined) setCode(value);
@@ -103,10 +121,14 @@ export function CodeWorkspace({ problemId, submitting, onSubmit }: CodeWorkspace
     if (submitDisabled || submissionInFlightRef.current) return;
 
     submissionInFlightRef.current = true;
+    setLocallySubmitting(true);
     try {
       await onSubmit({ language, code });
+    } catch {
+      // The parent owns user-facing submission errors; do not leak a rejected event promise.
     } finally {
       submissionInFlightRef.current = false;
+      setLocallySubmitting(false);
     }
   }
 
@@ -131,6 +153,7 @@ export function CodeWorkspace({ problemId, submitting, onSubmit }: CodeWorkspace
           height="100%"
           language={monacoLanguage[language]}
           options={editorOptions}
+          path={editorModelPath(problemId, language)}
           theme="vs-dark"
           value={code}
           onChange={handleEditorChange}
@@ -141,7 +164,7 @@ export function CodeWorkspace({ problemId, submitting, onSubmit }: CodeWorkspace
         <button
           type="button"
           disabled={submitDisabled}
-          aria-busy={submitting}
+          aria-busy={isSubmitting}
           style={{
             ...submitStyle,
             cursor: submitDisabled ? "not-allowed" : submitStyle.cursor,
@@ -150,7 +173,7 @@ export function CodeWorkspace({ problemId, submitting, onSubmit }: CodeWorkspace
           onClick={handleSubmit}
         >
           <Play size={16} aria-hidden="true" />
-          <span>{submitting ? "Submitting..." : "Submit"}</span>
+          <span>{isSubmitting ? "Submitting..." : "Submit"}</span>
         </button>
       </footer>
     </section>
