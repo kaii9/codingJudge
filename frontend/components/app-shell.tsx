@@ -1,0 +1,78 @@
+"use client";
+
+import { Server } from "lucide-react";
+import Link from "next/link";
+import { useEffect, useState, type ReactNode } from "react";
+
+type ServiceState = "checking" | "online" | "unavailable";
+
+const serviceLabels: Record<ServiceState, string> = {
+  checking: "Checking",
+  online: "Online",
+  unavailable: "Unavailable",
+};
+
+interface AppShellProps {
+  children: ReactNode;
+}
+
+function isHealthyResponse(value: unknown): value is { status: "ok" } {
+  return typeof value === "object" && value !== null && "status" in value && value.status === "ok";
+}
+
+export function AppShell({ children }: AppShellProps) {
+  const [serviceState, setServiceState] = useState<ServiceState>("checking");
+
+  useEffect(() => {
+    const controller = new AbortController();
+
+    async function checkHealth() {
+      try {
+        const response = await fetch("/api/healthz", { signal: controller.signal });
+        const payload: unknown = response.ok ? await response.json() : null;
+
+        if (!controller.signal.aborted) {
+          setServiceState(response.ok && isHealthyResponse(payload) ? "online" : "unavailable");
+        }
+      } catch {
+        if (!controller.signal.aborted) {
+          setServiceState("unavailable");
+        }
+      }
+    }
+
+    void checkHealth();
+
+    return () => controller.abort();
+  }, []);
+
+  const serviceLabel = serviceLabels[serviceState];
+
+  return (
+    <div className="app-shell">
+      <header className="app-shell__topbar">
+        <div className="app-shell__topbar-inner">
+          <Link className="app-shell__brand" href="/">
+            GOJUDGE
+          </Link>
+          <nav className="app-shell__nav" aria-label="Primary navigation">
+            <Link href="/">Problems</Link>
+            <Link href="/submissions">Submissions</Link>
+          </nav>
+          <div
+            className="service-indicator"
+            data-state={serviceState}
+            role="status"
+            aria-label={`Service status: ${serviceLabel}`}
+            aria-live="polite"
+          >
+            <Server aria-hidden="true" focusable="false" size={14} strokeWidth={2.25} />
+            <span className="service-indicator__dot" aria-hidden="true" />
+            <span>{serviceLabel}</span>
+          </div>
+        </div>
+      </header>
+      <div className="app-shell__content">{children}</div>
+    </div>
+  );
+}

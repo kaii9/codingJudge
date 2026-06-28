@@ -1,13 +1,23 @@
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+  --color-navy-950: #0b1739;
+  --color-navy-900: #12224a;
+  --color-yellow-400: #f4c542;
+  --color-red-600: #d83a43;
+  --color-green-600: #168653;
+  --color-amber-500: #c97b12;
+  --color-white: #ffffff;
+  --color-gray-50: #f7f9fc;
+  --color-gray-100: #eef2f7;
+  --color-gray-300: #c9d2df;
+  --color-gray-500: #66758a;
+  --color-gray-700: #344258;
+  --color-gray-900: #172033;
+  --color-border: #d7dee8;
+  --color-focus-ring: #2f6fed;
+  --background: var(--color-gray-50);
+  --foreground: var(--color-gray-900);
+  --radius-control: 6px;
+  --radius-panel: 8px;
 }
 
 html {
@@ -26,7 +36,7 @@ body {
   flex-direction: column;
   color: var(--foreground);
   background: var(--background);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-geist-sans), Arial, Helvetica, sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
@@ -35,6 +45,7 @@ body {
   box-sizing: border-box;
   padding: 0;
   margin: 0;
+  letter-spacing: 0;
 }
 
 a {
@@ -42,8 +53,159 @@ a {
   text-decoration: none;
 }
 
-@media (prefers-color-scheme: dark) {
-  html {
-    color-scheme: dark;
+:where(a, button, input, select, textarea):focus-visible {
+  outline: 2px solid var(--color-focus-ring);
+  outline-offset: 2px;
+}
+
+.app-shell {
+  min-height: 100vh;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+}
+
+.app-shell__topbar {
+  position: sticky;
+  z-index: 20;
+  top: 0;
+  height: 52px;
+  flex: 0 0 52px;
+  color: var(--color-white);
+  background: var(--color-navy-950);
+  border-bottom: 1px solid var(--color-navy-900);
+}
+
+.app-shell__topbar-inner {
+  width: min(100%, 1600px);
+  height: 100%;
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  padding: 0 20px;
+  margin: 0 auto;
+}
+
+.app-shell__brand {
+  color: var(--color-yellow-400);
+  font-size: 0.9rem;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.app-shell__nav {
+  height: 100%;
+  display: flex;
+  align-items: stretch;
+  gap: 2px;
+}
+
+.app-shell__nav a {
+  display: flex;
+  align-items: center;
+  padding: 0 12px;
+  color: var(--color-gray-100);
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+
+.app-shell__nav a:hover {
+  color: var(--color-white);
+  background: var(--color-navy-900);
+}
+
+.service-indicator {
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  margin-left: auto;
+  color: var(--color-gray-100);
+  background: var(--color-navy-900);
+  border: 1px solid rgb(255 255 255 / 16%);
+  border-radius: var(--radius-control);
+  font-size: 0.75rem;
+  font-weight: 650;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.service-indicator__dot {
+  width: 7px;
+  height: 7px;
+  flex: 0 0 7px;
+  background: var(--color-amber-500);
+  border-radius: 50%;
+}
+
+.service-indicator[data-state="online"] .service-indicator__dot {
+  background: var(--color-green-600);
+}
+
+.service-indicator[data-state="unavailable"] .service-indicator__dot {
+  background: var(--color-red-600);
+}
+
+.app-shell__content {
+  min-height: 0;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+}
+
+.status-badge {
+  width: fit-content;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 7px;
+  color: var(--color-gray-700);
+  background: var(--color-gray-100);
+  border: 1px solid var(--color-gray-300);
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 650;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+.status-badge[data-variant="info"] {
+  color: var(--color-navy-900);
+  background: #e9effb;
+  border-color: #b8c8e6;
+}
+
+.status-badge[data-variant="success"] {
+  color: #0d6840;
+  background: #e8f6ef;
+  border-color: #a9d9c2;
+}
+
+.status-badge[data-variant="warning"] {
+  color: #8a5208;
+  background: #fff4dd;
+  border-color: #e9c477;
+}
+
+.status-badge[data-variant="danger"] {
+  color: #a3262f;
+  background: #fdecee;
+  border-color: #ecb6bb;
+}
+
+@media (max-width: 560px) {
+  .app-shell__topbar-inner {
+    gap: 8px;
+    padding: 0 10px;
+  }
+
+  .app-shell__nav a {
+    padding: 0 7px;
+    font-size: 0.8125rem;
+  }
+
+  .service-indicator > svg {
+    display: none;
   }
 }
