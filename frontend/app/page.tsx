@@ -1,66 +1,76 @@
-import Image from "next/image";
-import styles from "./page.module.css";
+import { redirect } from "next/navigation";
+import type { Language, Problem } from "@/lib/types";
 
-export default function Home() {
+const DEFAULT_API_INTERNAL_URL = "http://localhost:8080";
+const supportedLanguages = new Set<Language>(["go", "cpp", "python"]);
+
+function isProblem(value: unknown): value is Problem {
+  if (typeof value !== "object" || value === null) return false;
+
+  const candidate = value as Partial<Problem>;
   return (
-    <div className={styles.page}>
-      <main className={styles.main}>
-        <Image
-          className={styles.logo}
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className={styles.intro}>
-          <h1>To get started, edit the page.tsx file.</h1>
-          <p>
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
-        </div>
-        <div className={styles.ctas}>
-          <a
-            className={styles.primary}
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className={styles.logo}
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className={styles.secondary}
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
-        </div>
-      </main>
-    </div>
+    typeof candidate.id === "string" &&
+    typeof candidate.title === "string" &&
+    typeof candidate.description === "string" &&
+    typeof candidate.language === "string" &&
+    supportedLanguages.has(candidate.language as Language) &&
+    typeof candidate.timeLimitMs === "number" &&
+    Number.isFinite(candidate.timeLimitMs) &&
+    typeof candidate.memoryLimitMb === "number" &&
+    Number.isFinite(candidate.memoryLimitMb)
   );
+}
+
+async function loadProblems(): Promise<Problem[] | null> {
+  const baseUrl = (process.env.API_INTERNAL_URL?.trim() || DEFAULT_API_INTERNAL_URL)
+    .replace(/\/+$/, "");
+
+  try {
+    const response = await fetch(`${baseUrl}/problems`, { cache: "no-store" });
+    if (!response.ok) return null;
+
+    const payload: unknown = await response.json();
+    return Array.isArray(payload) && payload.every(isProblem) ? payload : null;
+  } catch {
+    return null;
+  }
+}
+
+function ProblemIndexState({
+  title,
+  message,
+}: {
+  title: string;
+  message: string;
+}) {
+  return (
+    <main className="problem-index-state">
+      <h1>{title}</h1>
+      <p>{message}</p>
+    </main>
+  );
+}
+
+export default async function Home() {
+  const problems = await loadProblems();
+
+  if (problems === null) {
+    return (
+      <ProblemIndexState
+        title="Problems unavailable"
+        message="The problem service is unavailable. Try again later."
+      />
+    );
+  }
+
+  if (problems.length === 0) {
+    return (
+      <ProblemIndexState
+        title="No problems available"
+        message="There are no problems to solve yet."
+      />
+    );
+  }
+
+  redirect(`/problems/${encodeURIComponent(problems[0].id)}`);
 }
