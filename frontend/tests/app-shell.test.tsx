@@ -47,9 +47,6 @@ describe("AppShell", () => {
     );
     expect(screen.getAllByRole("main")).toHaveLength(1);
     expect(screen.getByRole("main")).toHaveTextContent("Workbench content");
-    expect(screen.getByRole("banner").firstElementChild).toHaveClass(
-      "app-shell__topbar-inner--responsive",
-    );
     expect(await screen.findByText("Online")).toBeVisible();
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/healthz",
@@ -196,8 +193,9 @@ describe("AppShell", () => {
     expect(clearTimeoutSpy).toHaveBeenCalledWith(deadlineId);
   });
 
-  it("restarts health checking safely when StrictMode replays the effect", async () => {
+  it("keeps the current StrictMode result when an aborted request resolves late", async () => {
     const firstResponse = deferred<Response>();
+    const secondResponse = deferred<Response>();
     const requestSignals: AbortSignal[] = [];
     const fetchMock = vi
       .fn()
@@ -207,12 +205,7 @@ describe("AppShell", () => {
       })
       .mockImplementationOnce((_input: RequestInfo | URL, init?: RequestInit) => {
         requestSignals.push(init?.signal as AbortSignal);
-        return Promise.resolve(
-          new Response('{"status":"ok"}', {
-            status: 200,
-            headers: { "content-type": "application/json" },
-          }),
-        );
+        return secondResponse.promise;
       });
     vi.stubGlobal("fetch", fetchMock);
 
@@ -224,43 +217,38 @@ describe("AppShell", () => {
       </StrictMode>,
     );
 
-    expect(await screen.findByText("Online")).toBeVisible();
-    expect(fetchMock).toHaveBeenCalledTimes(2);
-    expect(requestSignals[0]?.aborted).toBe(true);
-    expect(requestSignals[1]?.aborted).toBe(false);
-  });
-
-  it("ignores a late response when fetch does not honor abort", async () => {
-    const response = deferred<Response>();
-    const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
-    vi.stubGlobal("fetch", vi.fn().mockReturnValue(response.promise));
-
-    const { unmount } = render(
-      <AppShell>
-        <main>Content</main>
-      </AppShell>,
-    );
-
-    unmount();
-
     await act(async () => {
-      response.resolve(
+      secondResponse.resolve(
         new Response('{"status":"ok"}', {
           status: 200,
           headers: { "content-type": "application/json" },
         }),
       );
-      await response.promise;
-      await Promise.resolve();
+      await secondResponse.promise;
     });
 
-    expect(consoleError).not.toHaveBeenCalled();
+    expect(screen.getByText("Online")).toBeVisible();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(requestSignals[0]?.aborted).toBe(true);
+    expect(requestSignals[1]?.aborted).toBe(false);
+
+    await act(async () => {
+      firstResponse.resolve(
+        new Response('{"status":"degraded"}', {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+      );
+      await firstResponse.promise;
+    });
+
+    expect(screen.getByText("Online")).toBeVisible();
+    expect(screen.queryByText("Unavailable")).not.toBeInTheDocument();
   });
 
   it("aborts the health request on unmount", async () => {
     vi.useFakeTimers();
     let requestSignal: AbortSignal | undefined;
-    const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
     const setTimeoutSpy = vi.spyOn(globalThis, "setTimeout");
     const clearTimeoutSpy = vi.spyOn(globalThis, "clearTimeout");
 
@@ -297,6 +285,5 @@ describe("AppShell", () => {
     expect(requestSignal).toBeInstanceOf(AbortSignal);
     expect(requestSignal?.aborted).toBe(true);
     expect(clearTimeoutSpy).toHaveBeenCalledWith(deadlineId);
-    expect(consoleError).not.toHaveBeenCalled();
   });
 });

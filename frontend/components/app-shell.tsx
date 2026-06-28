@@ -68,7 +68,7 @@ export function AppShell({ children }: AppShellProps) {
   return (
     <div className="app-shell">
       <header className="app-shell__topbar">
-        <div className="app-shell__topbar-inner app-shell__topbar-inner--responsive">
+        <div className="app-shell__topbar-inner">
           <Link className="app-shell__brand" href="/">
             GOJUDGE
           </Link>
