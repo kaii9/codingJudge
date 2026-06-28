@@ -6,6 +6,7 @@ import { ProblemStatement } from "@/components/problem-statement";
 import type { Problem, Submission } from "@/lib/types";
 
 const redirectMock = vi.hoisted(() => vi.fn());
+const PROBLEM_FETCH_TIMEOUT_MS = 5_000;
 
 vi.mock("next/navigation", () => ({ redirect: redirectMock }));
 
@@ -46,6 +47,9 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
+  vi.clearAllTimers();
+  vi.restoreAllMocks();
+  vi.useRealTimers();
   vi.unstubAllEnvs();
   vi.unstubAllGlobals();
 });
@@ -117,7 +121,9 @@ describe("ProblemStatement", () => {
     render(<ProblemStatement problem={problemWithPrivateData} />);
 
     expect(screen.getByRole("heading", { level: 1, name: "A+B" })).toBeVisible();
-    expect(screen.getByText(/Read two integers\.\s+Print their sum\./)).toBeVisible();
+    expect(
+      screen.getByRole("region", { name: "Problem statement" }).querySelector("p"),
+    ).toHaveTextContent("Read two integers.Print their sum.");
     expect(screen.getByText("1000 ms")).toBeVisible();
     expect(screen.getByText("64 MB")).toBeVisible();
     expect(screen.getByText("go")).toBeVisible();
@@ -126,10 +132,32 @@ describe("ProblemStatement", () => {
     expect(screen.queryByText("PRIVATE INPUT SENTINEL")).not.toBeInTheDocument();
     expect(screen.queryByText("PRIVATE SOURCE SENTINEL")).not.toBeInTheDocument();
   });
+
+  it("preserves CRLF and LF description line breaks without parsing markup", () => {
+    render(
+      <ProblemStatement
+        problem={{
+          ...problems[0],
+          description:
+            "Read two integers.\r\n<strong>Keep this literal.</strong>\nPrint their sum.",
+        }}
+      />,
+    );
+
+    const statement = screen.getByRole("region", { name: "Problem statement" });
+    const description = statement.querySelector("p");
+
+    expect(description).not.toBeNull();
+    expect(description?.querySelectorAll("br")).toHaveLength(2);
+    expect(description).toHaveTextContent("<strong>Keep this literal.</strong>");
+    expect(description?.querySelector("strong")).toBeNull();
+  });
 });
 
 describe("root problem selection", () => {
   it("fetches on the server without caching and redirects to the encoded first ID", async () => {
+    const setTimeoutSpy = vi.spyOn(globalThis, "setTimeout");
+    const clearTimeoutSpy = vi.spyOn(globalThis, "clearTimeout");
     vi.stubGlobal(
       "fetch",
       vi.fn().mockResolvedValue(
@@ -143,11 +171,23 @@ describe("root problem selection", () => {
     await expect(Home()).rejects.toThrow(
       "redirect:/problems/arrays%2Ftwo%20words",
     );
-    expect(fetch).toHaveBeenCalledWith("http://api:8080/problems", {
-      cache: "no-store",
-    });
+    expect(fetch).toHaveBeenCalledWith(
+      "http://api:8080/problems",
+      expect.objectContaining({
+        cache: "no-store",
+        signal: expect.any(AbortSignal),
+      }),
+    );
     expect(redirectMock).toHaveBeenCalledWith(
       "/problems/arrays%2Ftwo%20words",
+    );
+
+    const deadlineCallIndex = setTimeoutSpy.mock.calls.findIndex(
+      ([, delay]) => delay === PROBLEM_FETCH_TIMEOUT_MS,
+    );
+    expect(deadlineCallIndex).toBeGreaterThanOrEqual(0);
+    expect(clearTimeoutSpy).toHaveBeenCalledWith(
+      setTimeoutSpy.mock.results[deadlineCallIndex]?.value,
     );
   });
 
@@ -157,12 +197,79 @@ describe("root problem selection", () => {
 
     render(await Home());
 
-    expect(fetch).toHaveBeenCalledWith("http://localhost:8080/problems", {
-      cache: "no-store",
-    });
+    expect(fetch).toHaveBeenCalledWith(
+      "http://localhost:8080/problems",
+      expect.objectContaining({
+        cache: "no-store",
+        signal: expect.any(AbortSignal),
+      }),
+    );
     expect(screen.getByRole("heading", { name: "No problems available" })).toBeVisible();
     expect(screen.getByText("There are no problems to solve yet.")).toBeVisible();
     expect(redirectMock).not.toHaveBeenCalled();
+  });
+
+  it("aborts a stalled backend request at the deadline and renders the safe error state", async () => {
+    vi.useFakeTimers();
+    let requestSignal: AbortSignal | undefined;
+    const setTimeoutSpy = vi.spyOn(globalThis, "setTimeout");
+    const clearTimeoutSpy = vi.spyOn(globalThis, "clearTimeout");
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockImplementation((_input: RequestInfo | URL, init?: RequestInit) => {
+        requestSignal = init?.signal ?? undefined;
+
+        return new Promise<Response>((_resolve, reject) => {
+          requestSignal?.addEventListener("abort", () => {
+            reject(new DOMException("SECRET timeout detail", "AbortError"));
+          });
+        });
+      }),
+    );
+
+    const page = Home();
+    const deadlineCallIndex = setTimeoutSpy.mock.calls.findIndex(
+      ([, delay]) => delay === PROBLEM_FETCH_TIMEOUT_MS,
+    );
+
+    expect(deadlineCallIndex).toBeGreaterThanOrEqual(0);
+    expect(requestSignal).toBeInstanceOf(AbortSignal);
+
+    await vi.advanceTimersByTimeAsync(PROBLEM_FETCH_TIMEOUT_MS);
+    render(await page);
+
+    expect(requestSignal?.aborted).toBe(true);
+    expect(clearTimeoutSpy).toHaveBeenCalledWith(
+      setTimeoutSpy.mock.results[deadlineCallIndex]?.value,
+    );
+    expect(
+      screen.getByRole("heading", { name: "Problems unavailable" }),
+    ).toBeVisible();
+    expect(screen.queryByText(/SECRET|api:8080/i)).not.toBeInTheDocument();
+  });
+
+  it("clears the backend deadline when fetch rejects before timeout", async () => {
+    const setTimeoutSpy = vi.spyOn(globalThis, "setTimeout");
+    const clearTimeoutSpy = vi.spyOn(globalThis, "clearTimeout");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockRejectedValue(new Error("SECRET early failure")),
+    );
+
+    render(await Home());
+
+    const deadlineCallIndex = setTimeoutSpy.mock.calls.findIndex(
+      ([, delay]) => delay === PROBLEM_FETCH_TIMEOUT_MS,
+    );
+    expect(deadlineCallIndex).toBeGreaterThanOrEqual(0);
+    expect(clearTimeoutSpy).toHaveBeenCalledWith(
+      setTimeoutSpy.mock.results[deadlineCallIndex]?.value,
+    );
+    expect(
+      screen.getByRole("heading", { name: "Problems unavailable" }),
+    ).toBeVisible();
+    expect(screen.queryByText(/SECRET|api:8080/i)).not.toBeInTheDocument();
   });
 
   it.each([

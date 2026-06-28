@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import type { Language, Problem } from "@/lib/types";
 
 const DEFAULT_API_INTERNAL_URL = "http://localhost:8080";
+const PROBLEM_FETCH_TIMEOUT_MS = 5_000;
 const supportedLanguages = new Set<Language>(["go", "cpp", "python"]);
 
 function isProblem(value: unknown): value is Problem {
@@ -24,15 +25,25 @@ function isProblem(value: unknown): value is Problem {
 async function loadProblems(): Promise<Problem[] | null> {
   const baseUrl = (process.env.API_INTERNAL_URL?.trim() || DEFAULT_API_INTERNAL_URL)
     .replace(/\/+$/, "");
+  const controller = new AbortController();
+  const deadlineId = globalThis.setTimeout(
+    () => controller.abort(),
+    PROBLEM_FETCH_TIMEOUT_MS,
+  );
 
   try {
-    const response = await fetch(`${baseUrl}/problems`, { cache: "no-store" });
+    const response = await fetch(`${baseUrl}/problems`, {
+      cache: "no-store",
+      signal: controller.signal,
+    });
     if (!response.ok) return null;
 
     const payload: unknown = await response.json();
     return Array.isArray(payload) && payload.every(isProblem) ? payload : null;
   } catch {
     return null;
+  } finally {
+    globalThis.clearTimeout(deadlineId);
   }
 }
 

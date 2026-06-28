@@ -1,3 +1,4 @@
+import { Fragment } from "react";
 import type { Problem } from "@/lib/types";
 
 interface ProblemStatementProps {
@@ -31,7 +32,14 @@ export function ProblemStatement({ problem }: ProblemStatementProps) {
 
       <section aria-labelledby="problem-description-heading">
         <h2 id="problem-description-heading">Problem statement</h2>
-        <p>{problem.description}</p>
+        <p>
+          {problem.description.split(/\r\n?|\n/).map((line, index) => (
+            <Fragment key={index}>
+              {index > 0 ? <br /> : null}
+              {line}
+            </Fragment>
+          ))}
+        </p>
       </section>
     </article>
   );
