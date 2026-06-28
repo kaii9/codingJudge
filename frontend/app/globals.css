@@ -194,18 +194,47 @@ a {
   border-color: #ecb6bb;
 }
 
-@media (max-width: 560px) {
+@media (max-width: 480px) {
+  .app-shell__topbar {
+    height: 56px;
+    flex-basis: 56px;
+  }
+
   .app-shell__topbar-inner {
-    gap: 8px;
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-rows: 24px 32px;
+    display: grid;
+    gap: 0 8px;
     padding: 0 10px;
   }
 
+  .app-shell__brand {
+    min-width: 0;
+    grid-column: 1;
+    grid-row: 1;
+    align-self: center;
+  }
+
+  .app-shell__nav {
+    min-width: 0;
+    height: 32px;
+    grid-column: 1 / -1;
+    grid-row: 2;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    display: grid;
+  }
+
   .app-shell__nav a {
-    padding: 0 7px;
+    min-width: 0;
+    justify-content: center;
+    padding: 0 6px;
     font-size: 0.8125rem;
   }
 
-  .service-indicator > svg {
-    display: none;
+  .service-indicator {
+    grid-column: 2;
+    grid-row: 1;
+    align-self: center;
+    margin-left: 0;
   }
 }

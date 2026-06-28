@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useEffect, useState, type ReactNode } from "react";
 
 type ServiceState = "checking" | "online" | "unavailable";
+const HEALTH_CHECK_TIMEOUT_MS = 5_000;
 
 const serviceLabels: Record<ServiceState, string> = {
   checking: "Checking",
@@ -25,25 +26,41 @@ export function AppShell({ children }: AppShellProps) {
 
   useEffect(() => {
     const controller = new AbortController();
+    let active = true;
+    let timedOut = false;
+    const deadlineId = globalThis.setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+
+      if (active) {
+        setServiceState("unavailable");
+      }
+    }, HEALTH_CHECK_TIMEOUT_MS);
 
     async function checkHealth() {
       try {
         const response = await fetch("/api/healthz", { signal: controller.signal });
         const payload: unknown = response.ok ? await response.json() : null;
 
-        if (!controller.signal.aborted) {
+        if (active && !timedOut) {
           setServiceState(response.ok && isHealthyResponse(payload) ? "online" : "unavailable");
         }
       } catch {
-        if (!controller.signal.aborted) {
+        if (active && !timedOut) {
           setServiceState("unavailable");
         }
+      } finally {
+        globalThis.clearTimeout(deadlineId);
       }
     }
 
     void checkHealth();
 
-    return () => controller.abort();
+    return () => {
+      active = false;
+      globalThis.clearTimeout(deadlineId);
+      controller.abort();
+    };
   }, []);
 
   const serviceLabel = serviceLabels[serviceState];
@@ -51,7 +68,7 @@ export function AppShell({ children }: AppShellProps) {
   return (
     <div className="app-shell">
       <header className="app-shell__topbar">
-        <div className="app-shell__topbar-inner">
+        <div className="app-shell__topbar-inner app-shell__topbar-inner--responsive">
           <Link className="app-shell__brand" href="/">
             GOJUDGE
           </Link>
