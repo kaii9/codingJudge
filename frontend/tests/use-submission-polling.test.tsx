@@ -111,6 +111,58 @@ it("aborts the active request and starts polling the new id", () => {
   unmount();
 });
 
+it("hides the previous submission while a new id is loading", async () => {
+  const replacement = deferred<Submission>();
+  const load = vi.fn()
+    .mockResolvedValueOnce({
+      ...queuedSubmission,
+      status: "accepted",
+      result: { status: "accepted" },
+    })
+    .mockImplementationOnce(() => replacement.promise);
+  const { result, rerender } = renderHook(
+    ({ id }: { id: string }) => useSubmissionPolling(id, load, 1000),
+    { initialProps: { id: "sub-1" } },
+  );
+  await advance(0);
+  expect(result.current.submission?.id).toBe("sub-1");
+
+  rerender({ id: "sub-2" });
+
+  expect(result.current.submission).toBeNull();
+  expect(result.current.isPolling).toBe(true);
+
+  await act(async () => replacement.resolve({
+    ...queuedSubmission,
+    id: "sub-2",
+    status: "accepted",
+    result: { status: "accepted" },
+  }));
+  expect(result.current.submission?.id).toBe("sub-2");
+});
+
+it("keeps the previous submission hidden when the new id fails", async () => {
+  const load = vi.fn()
+    .mockResolvedValueOnce({
+      ...queuedSubmission,
+      status: "accepted",
+      result: { status: "accepted" },
+    })
+    .mockRejectedValueOnce(new Error("replacement failed"));
+  const { result, rerender } = renderHook(
+    ({ id }: { id: string }) => useSubmissionPolling(id, load, 1000),
+    { initialProps: { id: "sub-1" } },
+  );
+  await advance(0);
+
+  rerender({ id: "sub-2" });
+  await advance(0);
+
+  expect(result.current.submission).toBeNull();
+  expect(result.current.error).toBe("replacement failed");
+  expect(result.current.isPolling).toBe(false);
+});
+
 it("retries immediately after a polling error", async () => {
   const acceptedSubmission: Submission = {
     ...queuedSubmission,
@@ -190,4 +242,64 @@ it("waits for each request to finish before scheduling the next one", async () =
   }));
   expect(maxActiveRequests).toBe(1);
   expect(result.current.isPolling).toBe(false);
+});
+
+it("uses the latest inline loader without restarting the active poll", async () => {
+  const loaderVersions: number[] = [];
+  const { result, rerender } = renderHook(
+    ({ version }: { version: number }) => useSubmissionPolling(
+      "sub-1",
+      async () => {
+        loaderVersions.push(version);
+        return version === 0
+          ? queuedSubmission
+          : {
+              ...queuedSubmission,
+              status: "accepted",
+              result: { status: "accepted" },
+            };
+      },
+      1000,
+    ),
+    { initialProps: { version: 0 } },
+  );
+
+  await advance(0);
+  expect(loaderVersions).toEqual([0]);
+
+  rerender({ version: 1 });
+  await advance(1000);
+
+  expect(loaderVersions).toEqual([0, 1]);
+  expect(result.current.submission?.status).toBe("accepted");
+});
+
+it("restarts an aborted request during StrictMode effect replay", async () => {
+  const signals: AbortSignal[] = [];
+  const load = vi.fn((_id: string, signal: AbortSignal) => {
+    signals.push(signal);
+    if (signals.length === 1) {
+      return new Promise<Submission>((_resolve, reject) => {
+        signal.addEventListener("abort", () => {
+          reject(new DOMException("Aborted", "AbortError"));
+        });
+      });
+    }
+    return Promise.resolve({
+      ...queuedSubmission,
+      status: "accepted",
+      result: { status: "accepted" },
+    } as Submission);
+  });
+  const { result } = renderHook(
+    () => useSubmissionPolling("sub-1", load, 1000),
+    { reactStrictMode: true },
+  );
+
+  await advance(0);
+
+  expect(load).toHaveBeenCalledTimes(2);
+  expect(signals[0].aborted).toBe(true);
+  expect(result.current.error).toBeNull();
+  expect(result.current.submission?.status).toBe("accepted");
 });

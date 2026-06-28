@@ -1,20 +1,36 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useEffectEvent,
+  useMemo,
+  useState,
+} from "react";
 import { getSubmission } from "@/lib/api";
 import { isTerminalStatus } from "@/lib/judge";
 import type { Submission } from "@/lib/types";
 
 type Loader = (id: string, signal: AbortSignal) => Promise<Submission>;
 
-interface PollingState {
+interface SubmissionTarget {
   id: string | null;
-  load: Loader;
+}
+
+interface PollingRun {
+  target: SubmissionTarget;
   intervalMs: number;
   retryVersion: number;
-  submission: Submission | null;
-  error: string | null;
-  isPolling: boolean;
+}
+
+interface SubmissionState {
+  target: SubmissionTarget;
+  submission: Submission;
+}
+
+interface ErrorState {
+  run: PollingRun;
+  message: string;
 }
 
 export function useSubmissionPolling(
@@ -23,39 +39,24 @@ export function useSubmissionPolling(
   intervalMs = 1000,
 ) {
   const [retryVersion, setRetryVersion] = useState(0);
-  const [state, setState] = useState<PollingState>(() => ({
-    id,
-    load,
+  const [submissionState, setSubmissionState] = useState<SubmissionState | null>(null);
+  const [errorState, setErrorState] = useState<ErrorState | null>(null);
+  const [completedRun, setCompletedRun] = useState<PollingRun | null>(null);
+  const target = useMemo<SubmissionTarget>(() => ({ id }), [id]);
+  const run = useMemo<PollingRun>(() => ({
+    target,
     intervalMs,
     retryVersion,
-    submission: null,
-    error: null,
-    isPolling: Boolean(id),
-  }));
-
-  if (
-    state.id !== id
-    || state.load !== load
-    || state.intervalMs !== intervalMs
-    || state.retryVersion !== retryVersion
-  ) {
-    setState({
-      id,
-      load,
-      intervalMs,
-      retryVersion,
-      submission: id ? state.submission : null,
-      error: null,
-      isPolling: Boolean(id),
-    });
-  }
+  }), [target, intervalMs, retryVersion]);
+  const loadSubmission = useEffectEvent(load);
 
   const retry = useCallback(() => {
     setRetryVersion((version) => version + 1);
   }, []);
 
   useEffect(() => {
-    if (!id) return;
+    const submissionId = run.target.id;
+    if (!submissionId) return;
 
     let stopped = false;
     let timeout: ReturnType<typeof setTimeout> | undefined;
@@ -64,17 +65,14 @@ export function useSubmissionPolling(
     const poll = async () => {
       controller = new AbortController();
       try {
-        const next = await load(id, controller.signal);
+        const next = await loadSubmission(submissionId, controller.signal);
         if (stopped) return;
 
-        const isTerminal = isTerminalStatus(next.status);
-        setState((current) => ({
-          ...current,
-          submission: next,
-          isPolling: !isTerminal,
-        }));
-        if (!isTerminal) {
-          timeout = setTimeout(poll, intervalMs);
+        setSubmissionState({ target: run.target, submission: next });
+        if (isTerminalStatus(next.status)) {
+          setCompletedRun(run);
+        } else {
+          timeout = setTimeout(poll, run.intervalMs);
         }
       } catch (caught) {
         if (
@@ -82,11 +80,10 @@ export function useSubmissionPolling(
           || (caught instanceof DOMException && caught.name === "AbortError")
         ) return;
 
-        setState((current) => ({
-          ...current,
-          error: caught instanceof Error ? caught.message : "Polling failed",
-          isPolling: false,
-        }));
+        setErrorState({
+          run,
+          message: caught instanceof Error ? caught.message : "Polling failed",
+        });
       }
     };
 
@@ -96,12 +93,15 @@ export function useSubmissionPolling(
       if (timeout !== undefined) clearTimeout(timeout);
       controller?.abort();
     };
-  }, [id, intervalMs, load, retryVersion]);
+  }, [run]);
 
+  const error = errorState?.run === run ? errorState.message : null;
   return {
-    submission: state.submission,
-    error: state.error,
-    isPolling: state.isPolling,
+    submission: submissionState?.target === target
+      ? submissionState.submission
+      : null,
+    error,
+    isPolling: Boolean(id) && completedRun !== run && error === null,
     retry,
   };
 }
