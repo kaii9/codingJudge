@@ -39,6 +39,7 @@ type LoadState =
       problems: Problem[];
       problem: Problem;
       submissions: Submission[];
+      warning: boolean;
     };
 
 interface SubmissionState {
@@ -59,7 +60,58 @@ interface WorkbenchProps {
   problemId: string;
 }
 
+interface WorkspaceLoadRequests {
+  problems: Promise<PromiseSettledResult<Problem[]>>;
+  problem: Promise<PromiseSettledResult<Problem>>;
+  submissions: Promise<PromiseSettledResult<Submission[]>>;
+}
+
 const RECENT_SUBMISSION_LIMIT = 8;
+const inFlightWorkspaceLoads = new Map<string, WorkspaceLoadRequests>();
+const workbenchTabs: ReadonlyArray<{ id: MobileTab; label: string }> = [
+  { id: "problem", label: "Problem" },
+  { id: "code", label: "Code" },
+  { id: "result", label: "Result" },
+];
+
+function keyboardTabTarget(current: MobileTab, key: string): MobileTab | null {
+  const currentIndex = workbenchTabs.findIndex(tab => tab.id === current);
+
+  if (key === "Home") return workbenchTabs[0].id;
+  if (key === "End") return workbenchTabs[workbenchTabs.length - 1].id;
+  if (key === "ArrowRight") {
+    return workbenchTabs[(currentIndex + 1) % workbenchTabs.length].id;
+  }
+  if (key === "ArrowLeft") {
+    return workbenchTabs[(currentIndex - 1 + workbenchTabs.length) % workbenchTabs.length].id;
+  }
+  return null;
+}
+
+function settle<T>(request: Promise<T>): Promise<PromiseSettledResult<T>> {
+  return request.then(
+    value => ({ status: "fulfilled", value }),
+    reason => ({ status: "rejected", reason }),
+  );
+}
+
+function loadWorkspace(problemId: string): WorkspaceLoadRequests {
+  const existing = inFlightWorkspaceLoads.get(problemId);
+  if (existing) return existing;
+
+  const requests: WorkspaceLoadRequests = {
+    problems: settle(getProblems()),
+    problem: settle(getProblem(problemId)),
+    submissions: settle(getSubmissions()),
+  };
+  inFlightWorkspaceLoads.set(problemId, requests);
+  void requests.problem.then(() => {
+    if (inFlightWorkspaceLoads.get(problemId) === requests) {
+      inFlightWorkspaceLoads.delete(problemId);
+    }
+  });
+  return requests;
+}
 
 const workbenchCss = `
   .workbench {
@@ -135,6 +187,14 @@ const workbenchCss = `
     color: #a3262f;
     background: #fdecee;
     border-top: 1px solid #ecb6bb;
+  }
+  .workbench__warning {
+    margin-bottom: 1rem;
+    padding: 0.75rem;
+    color: #8a5208;
+    background: #fff4dd;
+    border: 1px solid #e9c477;
+    border-radius: var(--radius-control);
   }
   .workbench-state {
     min-height: 42rem;
@@ -261,6 +321,7 @@ export function Workbench({ problemId }: WorkbenchProps) {
   const mountedRef = useRef(false);
   const loadRunRef = useRef(0);
   const createRunRef = useRef(0);
+  const historyRefreshRunRef = useRef(0);
   const refreshedSubmissionIdsRef = useRef(new Set<string>());
 
   const currentLoadState = loadState.problemId === problemId
@@ -292,6 +353,7 @@ export function Workbench({ problemId }: WorkbenchProps) {
     return () => {
       mountedRef.current = false;
       createRunRef.current += 1;
+      historyRefreshRunRef.current += 1;
     };
   }, []);
 
@@ -299,34 +361,62 @@ export function Workbench({ problemId }: WorkbenchProps) {
     let cancelled = false;
     const runId = loadRunRef.current + 1;
     loadRunRef.current = runId;
+    const historyRun = historyRefreshRunRef.current + 1;
+    historyRefreshRunRef.current = historyRun;
 
     const load = async () => {
-      try {
-        const [problems, problem, submissions] = await Promise.all([
-          getProblems(),
-          getProblem(problemId),
-          getSubmissions(),
-        ]);
-        if (cancelled) return;
+      const requests = loadWorkspace(problemId);
+      const problemResult = await requests.problem;
+      if (cancelled) return;
 
+      if (problemResult.status === "rejected") {
         setLoadState({
-          kind: "ready",
-          problemId,
-          loadVersion,
-          runId,
-          problems,
-          problem,
-          submissions,
-        });
-      } catch (error) {
-        if (cancelled) return;
-        setLoadState({
-          kind: isNotFound(error) ? "unknown" : "error",
+          kind: isNotFound(problemResult.reason) ? "unknown" : "error",
           problemId,
           loadVersion,
           runId,
         });
+        return;
       }
+
+      setLoadState({
+        kind: "ready",
+        problemId,
+        loadVersion,
+        runId,
+        problems: [problemResult.value],
+        problem: problemResult.value,
+        submissions: [],
+        warning: false,
+      });
+
+      void requests.problems.then(result => {
+        if (cancelled) return;
+        setLoadState(current => current.kind === "ready"
+          && current.problemId === problemId
+          && current.runId === runId
+          ? {
+              ...current,
+              problems: result.status === "fulfilled" ? result.value : current.problems,
+              warning: current.warning || result.status === "rejected",
+            }
+          : current);
+      });
+      void requests.submissions.then(result => {
+        if (
+          cancelled
+          || historyRefreshRunRef.current !== historyRun
+        ) return;
+        setLoadState(current => current.kind === "ready"
+          && current.problemId === problemId
+          && current.runId === runId
+          ? {
+              ...current,
+              submissions: result.status === "fulfilled" ? result.value : current.submissions,
+              warning: current.warning || result.status === "rejected",
+            }
+          : current);
+      });
     };
 
     void load();
@@ -389,6 +479,11 @@ export function Workbench({ problemId }: WorkbenchProps) {
         && loadRunRef.current === submittedLoadRun
         && createRunRef.current === createRun
       ) {
+        setTabState({
+          problemId: submittedProblemId,
+          runId: submittedLoadRun,
+          active: "code",
+        });
         setSubmissionState(current => ({
           problemId: submittedProblemId,
           runId: submittedLoadRun,
@@ -428,8 +523,13 @@ export function Workbench({ problemId }: WorkbenchProps) {
 
     refreshedSubmissionIdsRef.current.add(terminalSubmissionId);
     if (activeLoadRun !== null) {
+      const refreshRun = historyRefreshRunRef.current + 1;
+      historyRefreshRunRef.current = refreshRun;
       void getSubmissions().then(submissions => {
-        if (!mountedRef.current) return;
+        if (
+          !mountedRef.current
+          || historyRefreshRunRef.current !== refreshRun
+        ) return;
 
         setLoadState(current => current.kind === "ready"
           && current.problemId === problemId
@@ -446,18 +546,12 @@ export function Workbench({ problemId }: WorkbenchProps) {
     return <WorkbenchState kind={currentLoadState.kind} onRetry={retryLoad} />;
   }
 
-  const tabs: ReadonlyArray<{ id: MobileTab; label: string }> = [
-    { id: "problem", label: "Problem" },
-    { id: "code", label: "Code" },
-    { id: "result", label: "Result" },
-  ];
-
   return (
     <main className="workbench">
       <style>{workbenchCss}</style>
 
       <div className="workbench__tabs" role="tablist" aria-label="Workbench views">
-        {tabs.map(tab => (
+        {workbenchTabs.map(tab => (
           <button
             key={tab.id}
             id={`workbench-${tab.id}-tab`}
@@ -471,6 +565,20 @@ export function Workbench({ problemId }: WorkbenchProps) {
               runId: currentLoadState.runId,
               active: tab.id,
             })}
+            onKeyDown={event => {
+              const nextTab = keyboardTabTarget(tab.id, event.key);
+              if (!nextTab) return;
+
+              event.preventDefault();
+              setTabState({
+                problemId,
+                runId: currentLoadState.runId,
+                active: nextTab,
+              });
+              event.currentTarget.parentElement
+                ?.querySelector<HTMLButtonElement>(`#workbench-${nextTab}-tab`)
+                ?.focus();
+            }}
           >
             {tab.label}
           </button>
@@ -492,6 +600,15 @@ export function Workbench({ problemId }: WorkbenchProps) {
         aria-labelledby="workbench-problem-tab"
         data-active={mobileTab === "problem"}
       >
+        {currentLoadState.warning ? (
+          <p
+            className="workbench__warning"
+            role="status"
+            aria-label="Workspace warning"
+          >
+            Some workspace data is unavailable.
+          </p>
+        ) : null}
         <ProblemStatement problem={currentLoadState.problem} />
       </div>
 

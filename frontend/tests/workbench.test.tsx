@@ -165,6 +165,35 @@ describe("Workbench loading", () => {
     expect(screen.queryByText("SECRET missing detail")).not.toBeInTheDocument();
   });
 
+  it("keeps the selected problem available when auxiliary initial loads fail", async () => {
+    const problemsRequest = deferred<Problem[]>();
+    const submissionsRequest = deferred<Submission[]>();
+    api.getProblems.mockReturnValueOnce(problemsRequest.promise);
+    api.getSubmissions.mockReturnValueOnce(submissionsRequest.promise);
+
+    render(<Workbench problemId="sum" />);
+
+    expect(await screen.findByRole("heading", { level: 1, name: "A+B" })).toBeVisible();
+    await act(async () => {
+      problemsRequest.reject({
+        status: 404,
+        message: "SECRET problem-list detail",
+      });
+      submissionsRequest.reject(new Error("SECRET submission-history detail"));
+    });
+    expect(screen.queryByRole("heading", { name: "Problem not found" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Workbench unavailable" })).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "A+B" })).toHaveAttribute("aria-current", "page");
+    expect(screen.getByRole("region", { name: "Recent submissions" })).toHaveTextContent(
+      "No recent submissions.",
+    );
+    expect(await screen.findByRole("status", { name: "Workspace warning" })).toHaveTextContent(
+      "Some workspace data is unavailable.",
+    );
+    expect(screen.queryByText("SECRET problem-list detail")).not.toBeInTheDocument();
+    expect(screen.queryByText("SECRET submission-history detail")).not.toBeInTheDocument();
+  });
+
   it("retries a failed initial load", async () => {
     const user = userEvent.setup();
     api.getProblem.mockRejectedValueOnce(new Error("offline"));
@@ -174,6 +203,21 @@ describe("Workbench loading", () => {
 
     expect(await screen.findByRole("heading", { level: 1, name: "A+B" })).toBeVisible();
     expect(api.getProblem).toHaveBeenCalledTimes(2);
+  });
+
+  it("starts a fresh problem request when an auxiliary initial load never settles", async () => {
+    const user = userEvent.setup();
+    api.getProblems.mockReturnValue(new Promise<Problem[]>(() => {}));
+    api.getProblem
+      .mockRejectedValueOnce(new Error("offline"))
+      .mockResolvedValueOnce(sumProblem);
+
+    render(<Workbench problemId="retry-race" />);
+
+    await user.click(await screen.findByRole("button", { name: "Retry loading" }));
+
+    await waitFor(() => expect(api.getProblem).toHaveBeenCalledTimes(2));
+    expect(api.getProblem).toHaveBeenLastCalledWith("retry-race");
   });
 
   it("ignores a stale load after the problem changes", async () => {
@@ -258,6 +302,34 @@ describe("Workbench submissions", () => {
     await waitFor(() => expect(polling.ids).toContain("sub-1"));
     expect(api.createSubmission).toHaveBeenCalledTimes(2);
     expect(screen.queryByRole("alert", { name: "Submission error" })).not.toBeInTheDocument();
+  });
+
+  it("returns to Code before showing a deferred create failure", async () => {
+    const user = userEvent.setup();
+    const createRequest = deferred<Submission>();
+    api.createSubmission.mockReturnValue(createRequest.promise);
+    await renderReady();
+
+    const codeTab = screen.getByRole("tab", { name: "Code" });
+    const resultTab = screen.getByRole("tab", { name: "Result" });
+    await user.click(codeTab);
+    await user.click(screen.getByRole("button", { name: "Submit" }));
+    await user.click(resultTab);
+    expect(resultTab).toHaveAttribute("aria-selected", "true");
+
+    await act(async () => createRequest.reject(new Error("SECRET delayed rejection")));
+
+    const submitError = await screen.findByRole("alert", { name: "Submission error" });
+    expect(codeTab).toHaveAttribute("aria-selected", "true");
+    expect(resultTab).toHaveAttribute("aria-selected", "false");
+    expect(within(screen.getByRole("tabpanel", { name: "Code" })).getByRole("alert"))
+      .toBe(submitError);
+    expect(api.createSubmission).toHaveBeenCalledWith({
+      problemId: "sum",
+      language: "python",
+      code: "  print('exact')\n\n",
+    });
+    expect(screen.queryByText("SECRET delayed rejection")).not.toBeInTheDocument();
   });
 
   it("does not let a stale create overwrite a new problem", async () => {
@@ -356,11 +428,96 @@ describe("Workbench submissions", () => {
     await screen.findByRole("heading", { level: 1, name: "Echo" });
 
     await act(async () => oldRefresh.resolve([
-      { ...queuedSubmission, id: "stale-submission" },
+      { ...queuedSubmission, id: "stale-submission", status: "wrong_answer" },
     ]));
 
-    expect(screen.queryByText("stale-submission")).not.toBeInTheDocument();
+    const recent = screen.getByRole("region", { name: "Recent submissions" });
+    expect(within(recent).getByText("No recent submissions.")).toBeVisible();
+    expect(within(recent).queryByText("Wrong Answer")).not.toBeInTheDocument();
     expect(screen.getByRole("heading", { level: 1, name: "Echo" })).toBeVisible();
+  });
+
+  it("prevents an older same-problem refresh from overwriting newer history", async () => {
+    const user = userEvent.setup();
+    const view = await renderReady();
+    const firstRefresh = deferred<Submission[]>();
+    const secondRefresh = deferred<Submission[]>();
+    const firstSubmission = { ...queuedSubmission, id: "sub-a" };
+    const secondSubmission = { ...queuedSubmission, id: "sub-b" };
+    api.createSubmission.mockReset();
+    api.createSubmission
+      .mockResolvedValueOnce(firstSubmission)
+      .mockResolvedValueOnce(secondSubmission);
+    api.getSubmissions.mockReset();
+    api.getSubmissions
+      .mockReturnValueOnce(firstRefresh.promise)
+      .mockReturnValueOnce(secondRefresh.promise);
+
+    await user.click(screen.getByRole("button", { name: "Submit" }));
+    await waitFor(() => expect(polling.ids).toContain("sub-a"));
+    polling.submission = {
+      ...firstSubmission,
+      status: "accepted",
+      result: { status: "accepted" },
+    };
+    view.rerender(<Workbench problemId="sum" />);
+    await waitFor(() => expect(api.getSubmissions).toHaveBeenCalledTimes(1));
+
+    await user.click(screen.getByRole("button", { name: "Submit" }));
+    await waitFor(() => expect(polling.ids).toContain("sub-b"));
+    polling.submission = {
+      ...secondSubmission,
+      status: "accepted",
+      result: { status: "accepted" },
+    };
+    view.rerender(<Workbench problemId="sum" />);
+    await waitFor(() => expect(api.getSubmissions).toHaveBeenCalledTimes(2));
+
+    await act(async () => secondRefresh.resolve([
+      { ...secondSubmission, id: "history-entry", status: "accepted" },
+    ]));
+    const recent = screen.getByRole("region", { name: "Recent submissions" });
+    expect(within(recent).getByText("Accepted")).toBeVisible();
+
+    await act(async () => firstRefresh.resolve([
+      { ...firstSubmission, id: "history-entry", status: "wrong_answer" },
+    ]));
+
+    expect(within(recent).getByText("Accepted")).toBeVisible();
+    expect(within(recent).queryByText("Wrong Answer")).not.toBeInTheDocument();
+  });
+
+  it("prevents late initial history from overwriting a terminal refresh", async () => {
+    const user = userEvent.setup();
+    const initialHistory = deferred<Submission[]>();
+    const refreshedSubmission = {
+      ...queuedSubmission,
+      id: "history-entry",
+      status: "accepted" as const,
+    };
+    api.getSubmissions
+      .mockReturnValueOnce(initialHistory.promise)
+      .mockResolvedValueOnce([refreshedSubmission]);
+    const view = await renderReady();
+
+    await user.click(screen.getByRole("button", { name: "Submit" }));
+    polling.submission = {
+      ...queuedSubmission,
+      status: "accepted",
+      result: { status: "accepted" },
+    };
+    view.rerender(<Workbench problemId="sum" />);
+
+    await waitFor(() => expect(api.getSubmissions).toHaveBeenCalledTimes(2));
+    const recent = screen.getByRole("region", { name: "Recent submissions" });
+    expect(await within(recent).findByText("Accepted")).toBeVisible();
+
+    await act(async () => initialHistory.resolve([
+      { ...refreshedSubmission, status: "wrong_answer" },
+    ]));
+
+    expect(within(recent).getByText("Accepted")).toBeVisible();
+    expect(within(recent).queryByText("Wrong Answer")).not.toBeInTheDocument();
   });
 
   it("passes polling failures through the retained result panel", async () => {
@@ -414,6 +571,57 @@ describe("Workbench layout", () => {
     await user.click(resultTab);
     expect(resultTab).toHaveAttribute("aria-selected", "true");
     expect(screen.getByRole("tabpanel", { name: "Result" })).toHaveAttribute("data-active", "true");
+  });
+
+  it("supports roving keyboard navigation and focuses the selected tab", async () => {
+    const user = userEvent.setup();
+    await renderReady();
+
+    const problemTab = screen.getByRole("tab", { name: "Problem" });
+    const codeTab = screen.getByRole("tab", { name: "Code" });
+    const resultTab = screen.getByRole("tab", { name: "Result" });
+    problemTab.focus();
+
+    await user.keyboard("{ArrowRight}");
+    expect(codeTab).toHaveFocus();
+    expect(codeTab).toHaveAttribute("aria-selected", "true");
+
+    await user.keyboard("{End}");
+    expect(resultTab).toHaveFocus();
+    expect(resultTab).toHaveAttribute("aria-selected", "true");
+
+    await user.keyboard("{Home}");
+    expect(problemTab).toHaveFocus();
+    expect(problemTab).toHaveAttribute("aria-selected", "true");
+
+    await user.keyboard("{ArrowLeft}");
+    expect(resultTab).toHaveFocus();
+    expect(resultTab).toHaveAttribute("aria-selected", "true");
+
+    await user.keyboard("{ArrowRight}");
+    expect(problemTab).toHaveFocus();
+    expect(problemTab).toHaveAttribute("aria-selected", "true");
+    expect(problemTab).toHaveAttribute("aria-controls", "workbench-problem-panel");
+  });
+
+  it("shares only in-flight initial GETs during StrictMode replay", async () => {
+    const firstMount = render(
+      <StrictMode>
+        <Workbench problemId="sum" />
+      </StrictMode>,
+    );
+
+    expect(await screen.findByRole("heading", { level: 1, name: "A+B" })).toBeVisible();
+    expect(api.getProblems).toHaveBeenCalledTimes(1);
+    expect(api.getProblem).toHaveBeenCalledTimes(1);
+    expect(api.getSubmissions).toHaveBeenCalledTimes(1);
+
+    firstMount.unmount();
+    render(<Workbench problemId="sum" />);
+    expect(await screen.findByRole("heading", { level: 1, name: "A+B" })).toBeVisible();
+    expect(api.getProblems).toHaveBeenCalledTimes(2);
+    expect(api.getProblem).toHaveBeenCalledTimes(2);
+    expect(api.getSubmissions).toHaveBeenCalledTimes(2);
   });
 
   it("uses stable left, center, right, and bottom workbench regions", async () => {
