@@ -12,6 +12,8 @@ const api = vi.hoisted(() => ({
   getSubmissions: vi.fn(),
 }));
 
+const requestDeadlineMs = 10_000;
+
 vi.mock("@/lib/api", () => api);
 
 const newestSubmission: Submission & {
@@ -115,6 +117,43 @@ describe("SubmissionHistory", () => {
     expect(container.querySelectorAll("table")).toHaveLength(1);
   });
 
+  it("renders duplicate submission IDs in order without duplicate-key warnings", () => {
+    const firstDuplicate = {
+      ...newestSubmission,
+      id: "duplicate-submission-id",
+      problemId: "first-duplicate-problem",
+    };
+    const secondDuplicate = {
+      ...olderSubmission,
+      id: "duplicate-submission-id",
+      problemId: "second-duplicate-problem",
+    };
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    try {
+      render(
+        <SubmissionHistory
+          submissions={[firstDuplicate, secondDuplicate]}
+          loading={false}
+          error={null}
+          onRetry={vi.fn()}
+        />,
+      );
+
+      expect(screen.getAllByTestId("submission-id").map(cell => cell.textContent)).toEqual([
+        firstDuplicate.id,
+        secondDuplicate.id,
+      ]);
+      expect(screen.getAllByRole("link").map(link => link.textContent)).toEqual([
+        firstDuplicate.problemId,
+        secondDuplicate.problemId,
+      ]);
+      expect(consoleError.mock.calls.flat().join(" ")).not.toMatch(/same key|unique.*key/i);
+    } finally {
+      consoleError.mockRestore();
+    }
+  });
+
   it("uses collision-safe encoded problem links", () => {
     render(
       <SubmissionHistory
@@ -164,6 +203,29 @@ describe("SubmissionHistory", () => {
     const olderRow = screen.getByText(olderSubmission.id).closest("tr");
     expect(olderRow).not.toBeNull();
     expect(within(olderRow!).queryByText(/\d+ ms/)).not.toBeInTheDocument();
+  });
+
+  it("renders a bounded fallback instead of invalid timestamp data", () => {
+    const invalidTimestamp = `not-a-date-${"x".repeat(500)}`;
+    const invalidTimestampSubmission: Submission = {
+      ...newestSubmission,
+      id: "sub-invalid-timestamp",
+      createdAt: invalidTimestamp,
+    };
+    render(
+      <SubmissionHistory
+        submissions={[invalidTimestampSubmission]}
+        loading={false}
+        error={null}
+        onRetry={vi.fn()}
+      />,
+    );
+
+    const row = screen.getByTestId("submission-id").closest("tr");
+    const submittedCell = row?.querySelector<HTMLElement>('td[data-label="Submitted"]');
+    expect(submittedCell).toHaveTextContent("Unknown");
+    expect(submittedCell).not.toHaveTextContent(invalidTimestamp);
+    expect(submittedCell?.querySelector("time")).not.toBeInTheDocument();
   });
 
   it("does not expose source, process output, or test data", () => {
@@ -507,5 +569,108 @@ describe("SubmissionsPage", () => {
     await act(async () => laterMountRequest.resolve([]));
     expect(screen.getByText("No submissions yet")).toBeVisible();
     expect(api.getSubmissions.mock.calls).toEqual([[], []]);
+  });
+
+  it("times out an initial request, ignores its late result, and clears the shared entry", async () => {
+    vi.useFakeTimers();
+    const hangingRequest = deferred<Submission[]>();
+    const laterMountRequest = deferred<Submission[]>();
+    api.getSubmissions
+      .mockReturnValueOnce(hangingRequest.promise)
+      .mockReturnValueOnce(laterMountRequest.promise);
+
+    try {
+      const firstView = render(<SubmissionsPage />);
+      expect(api.getSubmissions).toHaveBeenCalledTimes(1);
+
+      await act(async () => vi.advanceTimersByTimeAsync(requestDeadlineMs));
+      expect(screen.getByRole("alert")).toHaveTextContent(
+        "Unable to load submissions. Try again.",
+      );
+      expect(screen.getByRole("button", { name: "Retry" })).toBeVisible();
+      expect(screen.queryByRole("status", { name: "Loading submissions" }))
+        .not.toBeInTheDocument();
+
+      await act(async () => hangingRequest.resolve([olderSubmission]));
+      expect(screen.getByRole("alert")).toBeVisible();
+      expect(screen.queryByText(olderSubmission.id)).not.toBeInTheDocument();
+
+      firstView.unmount();
+      render(<SubmissionsPage />);
+      expect(api.getSubmissions).toHaveBeenCalledTimes(2);
+      await act(async () => laterMountRequest.resolve([newestSubmission]));
+      expect(screen.getByText(newestSubmission.id)).toBeVisible();
+    } finally {
+      await act(async () => {
+        hangingRequest.resolve([]);
+        laterMountRequest.resolve([]);
+        await Promise.resolve();
+      });
+      vi.clearAllTimers();
+      vi.useRealTimers();
+    }
+  });
+
+  it("bounds Retry requests, retains rows, and lets Retry start fresh work", async () => {
+    vi.useFakeTimers();
+    const hangingRetry = deferred<Submission[]>();
+    const freshRetry = deferred<Submission[]>();
+    api.getSubmissions
+      .mockResolvedValueOnce([newestSubmission])
+      .mockReturnValueOnce(hangingRetry.promise)
+      .mockReturnValueOnce(freshRetry.promise);
+
+    try {
+      render(<SubmissionsPage />);
+      await act(async () => Promise.resolve());
+      expect(screen.getByText(newestSubmission.id)).toBeVisible();
+
+      act(() => latestHistoryProps?.onRetry());
+      expect(screen.getByRole("status")).toHaveTextContent("Refreshing submissions");
+      await act(async () => vi.advanceTimersByTimeAsync(requestDeadlineMs));
+
+      expect(screen.getByRole("alert")).toBeVisible();
+      expect(screen.getByText(newestSubmission.id)).toBeVisible();
+      expect(screen.queryByRole("status")).not.toBeInTheDocument();
+
+      act(() => latestHistoryProps?.onRetry());
+      expect(api.getSubmissions).toHaveBeenCalledTimes(3);
+      expect(screen.getByRole("status")).toHaveTextContent("Refreshing submissions");
+
+      await act(async () => hangingRetry.resolve([olderSubmission]));
+      expect(screen.queryByText(olderSubmission.id)).not.toBeInTheDocument();
+      await act(async () => freshRetry.resolve([runningSubmission]));
+      expect(screen.getByText(runningSubmission.id)).toBeVisible();
+    } finally {
+      await act(async () => {
+        hangingRetry.resolve([]);
+        freshRetry.resolve([]);
+        await Promise.resolve();
+      });
+      vi.clearAllTimers();
+      vi.useRealTimers();
+    }
+  });
+
+  it("clears the request deadline timer when the initial request settles early", async () => {
+    vi.useFakeTimers();
+    const request = deferred<Submission[]>();
+    api.getSubmissions.mockReturnValue(request.promise);
+
+    try {
+      render(<SubmissionsPage />);
+      expect(vi.getTimerCount()).toBe(1);
+
+      await act(async () => request.resolve([]));
+      expect(screen.getByText("No submissions yet")).toBeVisible();
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      await act(async () => {
+        request.resolve([]);
+        await Promise.resolve();
+      });
+      vi.clearAllTimers();
+      vi.useRealTimers();
+    }
   });
 });

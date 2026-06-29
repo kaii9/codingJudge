@@ -6,13 +6,34 @@ import { getSubmissions } from "@/lib/api";
 import type { Submission } from "@/lib/types";
 
 const GENERIC_LOAD_ERROR = "Unable to load submissions. Try again.";
+const REQUEST_DEADLINE_MS = 10_000;
 
 let inFlightInitialRequest: Promise<Submission[]> | null = null;
+
+function withRequestDeadline(request: Promise<Submission[]>) {
+  return new Promise<Submission[]>((resolve, reject) => {
+    const timeoutId = setTimeout(
+      () => reject(new Error("Submission request timed out.")),
+      REQUEST_DEADLINE_MS,
+    );
+
+    void request.then(
+      submissions => {
+        clearTimeout(timeoutId);
+        resolve(submissions);
+      },
+      error => {
+        clearTimeout(timeoutId);
+        reject(error);
+      },
+    );
+  });
+}
 
 function getInitialSubmissions() {
   if (inFlightInitialRequest) return inFlightInitialRequest;
 
-  const request = getSubmissions();
+  const request = withRequestDeadline(getSubmissions());
   inFlightInitialRequest = request;
   const clearRequest = () => {
     if (inFlightInitialRequest === request) inFlightInitialRequest = null;
@@ -60,7 +81,7 @@ export default function SubmissionsPage() {
   const retry = useCallback(() => {
     setError(null);
     setLoading(true);
-    observeRequest(getSubmissions());
+    observeRequest(withRequestDeadline(getSubmissions()));
   }, [observeRequest]);
 
   return (

@@ -231,7 +231,7 @@ const submissionHistoryCss = `
 
 function formatTimestamp(value: string) {
   const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? value : timestampFormatter.format(date);
+  return Number.isNaN(date.getTime()) ? null : timestampFormatter.format(date);
 }
 
 function HistoryError({ onRetry }: Pick<SubmissionHistoryProps, "onRetry">) {
@@ -290,11 +290,12 @@ function HistoryTable({ submissions }: Pick<SubmissionHistoryProps, "submissions
           </tr>
         </thead>
         <tbody>
-          {submissions.map(submission => {
+          {submissions.map((submission, index) => {
             const durationMs = submission.result?.durationMs;
+            const formattedCreatedAt = formatTimestamp(submission.createdAt);
 
             return (
-              <tr className="submission-history__row" key={submission.id}>
+              <tr className="submission-history__row" key={`${submission.id}:${index}`}>
                 <td data-label="Submission" data-testid="submission-id">
                   {submission.id}
                 </td>
@@ -306,9 +307,9 @@ function HistoryTable({ submissions }: Pick<SubmissionHistoryProps, "submissions
                 <td data-label="Language">{languageLabels[submission.language]}</td>
                 <td data-label="Status"><StatusBadge status={submission.status} /></td>
                 <td data-label="Submitted">
-                  <time dateTime={submission.createdAt}>
-                    {formatTimestamp(submission.createdAt)}
-                  </time>
+                  {formattedCreatedAt ? (
+                    <time dateTime={submission.createdAt}>{formattedCreatedAt}</time>
+                  ) : "Unknown"}
                 </td>
                 <td data-label="Duration">
                   {durationMs !== undefined ? `${durationMs} ms` : null}
