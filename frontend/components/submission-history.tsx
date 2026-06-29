@@ -272,12 +272,12 @@ function HistoryTable({ submissions }: Pick<SubmissionHistoryProps, "submissions
       <table className="submission-history__table">
         <caption>Submission history</caption>
         <colgroup>
-          <col style={{ width: "17%" }} />
-          <col style={{ width: "18%" }} />
-          <col style={{ width: "11%" }} />
-          <col style={{ width: "18%" }} />
-          <col style={{ width: "25%" }} />
-          <col style={{ width: "11%" }} />
+          <col style={{ width: "14%" }} />
+          <col style={{ width: "14%" }} />
+          <col style={{ width: "10%" }} />
+          <col style={{ width: "26%" }} />
+          <col style={{ width: "26%" }} />
+          <col style={{ width: "10%" }} />
         </colgroup>
         <thead>
           <tr>

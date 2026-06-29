@@ -58,6 +58,16 @@ const runningSubmission: Submission = {
   updatedAt: "2026-06-27T08:09:10Z",
 };
 
+const timedOutSubmission: Submission = {
+  id: "submission-with-a-long-identifier-that-must-wrap",
+  problemId: "slow-solution",
+  language: "cpp",
+  status: "time_limit_exceeded",
+  result: { status: "time_limit_exceeded", durationMs: 1_234 },
+  createdAt: "2026-06-30T11:22:33Z",
+  updatedAt: "2026-06-30T11:22:35Z",
+};
+
 function deferred<T>() {
   let resolve!: (value: T) => void;
   let reject!: (reason?: unknown) => void;
@@ -274,15 +284,6 @@ describe("SubmissionHistory", () => {
   });
 
   it("uses compact semantic rows at 721px for the longest status and all metadata", () => {
-    const timedOutSubmission: Submission = {
-      id: "submission-with-a-long-identifier-that-must-wrap",
-      problemId: "slow-solution",
-      language: "cpp",
-      status: "time_limit_exceeded",
-      result: { status: "time_limit_exceeded", durationMs: 1_234 },
-      createdAt: "2026-06-30T11:22:33Z",
-      updatedAt: "2026-06-30T11:22:35Z",
-    };
     const { container } = render(
       <SubmissionHistory
         submissions={[timedOutSubmission]}
@@ -318,6 +319,27 @@ describe("SubmissionHistory", () => {
     );
     expect(compactBreakpoint).not.toBeNull();
     expect(Number(compactBreakpoint?.[1])).toBeGreaterThanOrEqual(721);
+  });
+
+  it("allocates safe desktop shares to the longest status and submitted metadata", () => {
+    render(
+      <SubmissionHistory
+        submissions={[timedOutSubmission]}
+        loading={false}
+        error={null}
+        onRetry={vi.fn()}
+      />,
+    );
+
+    const table = screen.getByRole("table", { name: "Submission history" });
+    const columnShares = Array.from(table.querySelectorAll("col"), column =>
+      Number.parseFloat(column.style.width),
+    );
+    expect(within(table).getByText("Time Limit Exceeded")).toBeVisible();
+    expect(columnShares).toHaveLength(6);
+    expect(columnShares[3]).toBeGreaterThanOrEqual(25);
+    expect(columnShares[4]).toBeGreaterThanOrEqual(25);
+    expect(columnShares.reduce((total, share) => total + share, 0)).toBe(100);
   });
 });
 
