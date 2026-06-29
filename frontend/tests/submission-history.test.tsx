@@ -268,9 +268,56 @@ describe("SubmissionHistory", () => {
     }
 
     const componentCss = container.querySelector("style")?.textContent ?? "";
-    expect(componentCss).toContain("@media (max-width: 720px)");
+    expect(componentCss).toContain("@media (max-width: 768px)");
     expect(componentCss).toContain("overflow-wrap");
     expect(componentCss).toContain("table-layout: fixed");
+  });
+
+  it("uses compact semantic rows at 721px for the longest status and all metadata", () => {
+    const timedOutSubmission: Submission = {
+      id: "submission-with-a-long-identifier-that-must-wrap",
+      problemId: "slow-solution",
+      language: "cpp",
+      status: "time_limit_exceeded",
+      result: { status: "time_limit_exceeded", durationMs: 1_234 },
+      createdAt: "2026-06-30T11:22:33Z",
+      updatedAt: "2026-06-30T11:22:35Z",
+    };
+    const { container } = render(
+      <SubmissionHistory
+        submissions={[timedOutSubmission]}
+        loading={false}
+        error={null}
+        onRetry={vi.fn()}
+      />,
+    );
+
+    const table = screen.getByRole("table", { name: "Submission history" });
+    const rows = within(table).getAllByRole("row");
+    expect(container.querySelectorAll("table")).toHaveLength(1);
+    expect(rows).toHaveLength(2);
+    expect(container.querySelectorAll("tbody .submission-history__row")).toHaveLength(1);
+    expect(container.querySelectorAll("ul, ol")).toHaveLength(0);
+
+    const dataRow = rows[1];
+    expect(within(dataRow).getByTestId("submission-id")).toHaveTextContent(
+      timedOutSubmission.id,
+    );
+    expect(within(dataRow).getByText("slow-solution")).toBeVisible();
+    expect(within(dataRow).getByText("C++")).toBeVisible();
+    expect(within(dataRow).getByText("Time Limit Exceeded")).toBeVisible();
+    expect(within(dataRow).getByText("1234 ms")).toBeVisible();
+    expect(dataRow.querySelector("time")).toHaveAttribute(
+      "datetime",
+      timedOutSubmission.createdAt,
+    );
+
+    const componentCss = container.querySelector("style")?.textContent ?? "";
+    const compactBreakpoint = componentCss.match(
+      /@media \(max-width: (\d+)px\)\s*{[\s\S]*?\.submission-history__row\s*{[\s\S]*?display: grid;/,
+    );
+    expect(compactBreakpoint).not.toBeNull();
+    expect(Number(compactBreakpoint?.[1])).toBeGreaterThanOrEqual(721);
   });
 });
 

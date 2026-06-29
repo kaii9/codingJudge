@@ -177,7 +177,7 @@ const submissionHistoryCss = `
     white-space: nowrap;
     border: 0;
   }
-  @media (max-width: 720px) {
+  @media (max-width: 768px) {
     .submission-history {
       padding: 1rem 0.75rem;
     }
