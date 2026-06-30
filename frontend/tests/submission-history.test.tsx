@@ -12,7 +12,7 @@ const api = vi.hoisted(() => ({
   getSubmissions: vi.fn(),
 }));
 
-const requestDeadlineMs = 10_000;
+const requestDeadlineMs = 5_000;
 
 vi.mock("@/lib/api", () => api);
 
@@ -583,7 +583,11 @@ describe("SubmissionsPage", () => {
       const firstView = render(<SubmissionsPage />);
       expect(api.getSubmissions).toHaveBeenCalledTimes(1);
 
-      await act(async () => vi.advanceTimersByTimeAsync(requestDeadlineMs));
+      await act(async () => vi.advanceTimersByTimeAsync(requestDeadlineMs - 1));
+      expect(screen.getByRole("status", { name: "Loading submissions" })).toBeVisible();
+      expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+
+      await act(async () => vi.advanceTimersByTimeAsync(1));
       expect(screen.getByRole("alert")).toHaveTextContent(
         "Unable to load submissions. Try again.",
       );
@@ -627,9 +631,16 @@ describe("SubmissionsPage", () => {
 
       act(() => latestHistoryProps?.onRetry());
       expect(screen.getByRole("status")).toHaveTextContent("Refreshing submissions");
-      await act(async () => vi.advanceTimersByTimeAsync(requestDeadlineMs));
+      await act(async () => vi.advanceTimersByTimeAsync(requestDeadlineMs - 1));
+      expect(screen.getByRole("status")).toHaveTextContent("Refreshing submissions");
+      expect(screen.queryByRole("alert")).not.toBeInTheDocument();
 
-      expect(screen.getByRole("alert")).toBeVisible();
+      await act(async () => vi.advanceTimersByTimeAsync(1));
+
+      expect(screen.getByRole("alert")).toHaveTextContent(
+        "Unable to load submissions. Try again.",
+      );
+      expect(screen.getByRole("button", { name: "Retry" })).toBeVisible();
       expect(screen.getByText(newestSubmission.id)).toBeVisible();
       expect(screen.queryByRole("status")).not.toBeInTheDocument();
 

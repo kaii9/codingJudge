@@ -6,7 +6,7 @@ import { getSubmissions } from "@/lib/api";
 import type { Submission } from "@/lib/types";
 
 const GENERIC_LOAD_ERROR = "Unable to load submissions. Try again.";
-const REQUEST_DEADLINE_MS = 10_000;
+const REQUEST_DEADLINE_MS = 5_000;
 
 let inFlightInitialRequest: Promise<Submission[]> | null = null;
 
