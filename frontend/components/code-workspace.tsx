@@ -47,6 +47,7 @@ const editorOptions = {
   accessibilitySupport: "auto",
   ariaLabel: "Code editor",
   automaticLayout: true,
+  editContext: false,
   fontSize: 14,
   minimap: { enabled: false },
   scrollBeyondLastLine: false,

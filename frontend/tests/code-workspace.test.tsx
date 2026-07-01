@@ -103,6 +103,7 @@ it.each([
   expect(latestMonacoProps()).toMatchObject({
     height: "100%",
     language: monacoLanguage,
+    options: { editContext: false },
     theme: "vs-dark",
   });
   expect(screen.getByRole("option", { name: label })).toHaveValue(language);
