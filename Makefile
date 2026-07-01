@@ -17,7 +17,8 @@ frontend-test: frontend-deps
 frontend-build: frontend-deps
 	npm --prefix frontend run build
 
-test-all: test frontend-test frontend-build
+test-all: test
+	$(MAKE) frontend-test frontend-build
 
 build:
 	go build -o bin/api ./cmd/api
