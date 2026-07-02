@@ -170,25 +170,6 @@ func (s *PostgresStore) GetSubmission(ctx context.Context, id string) (domain.Su
 	return sub, true, nil
 }
 
-func (s *PostgresStore) UpdateSubmissionStatus(ctx context.Context, id string, status domain.SubmissionStatus) error {
-	_, err := s.pool.Exec(ctx, `
-		UPDATE submissions
-		SET status = $2, updated_at = now()
-		WHERE id = $1
-	`, id, status)
-	return err
-}
-
-func (s *PostgresStore) UpdateSubmissionResult(ctx context.Context, id string, result domain.JudgeResult) error {
-	result.Status = normalizeFinalStatus(result.Status)
-	_, err := s.pool.Exec(ctx, `
-		UPDATE submissions
-		SET status = $2, stdout = $3, stderr = $4, exit_code = $5, duration_ms = $6, updated_at = now()
-		WHERE id = $1
-	`, id, result.Status, result.Stdout, result.Stderr, result.ExitCode, result.Duration)
-	return err
-}
-
 type submissionScanner interface {
 	Scan(dest ...any) error
 }

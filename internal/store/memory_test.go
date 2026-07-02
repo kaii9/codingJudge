@@ -3,6 +3,7 @@ package store_test
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/kai/codingjudge/internal/domain"
 	"github.com/kai/codingjudge/internal/store"
@@ -61,8 +62,13 @@ func TestMemoryStoreUpdatesSubmissionResult(t *testing.T) {
 		Stdout:   "ok\n",
 		Duration: 12,
 	}
-	if err := st.UpdateSubmissionResult(context.Background(), sub.ID, result); err != nil {
-		t.Fatalf("UpdateSubmissionResult returned error: %v", err)
+	now := time.Now().UTC()
+	claim, err := st.ClaimSubmission(context.Background(), sub.ID, "worker", "token", "1-0", now, time.Minute)
+	if err != nil || claim.State != domain.ClaimAcquired {
+		t.Fatalf("ClaimSubmission = %+v, %v", claim, err)
+	}
+	if ok, err := st.CompleteSubmission(context.Background(), sub.ID, "token", now.Add(time.Second), result); err != nil || !ok {
+		t.Fatalf("CompleteSubmission = %v, %v", ok, err)
 	}
 
 	got, ok, err := st.GetSubmission(context.Background(), sub.ID)

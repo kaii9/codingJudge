@@ -140,44 +140,6 @@ func (s *MemoryStore) ListSubmissions(ctx context.Context) ([]domain.Submission,
 	return submissions, nil
 }
 
-func (s *MemoryStore) UpdateSubmissionStatus(ctx context.Context, id string, status domain.SubmissionStatus) error {
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	sub, ok := s.submissions[id]
-	if !ok {
-		return fmt.Errorf("submission %q not found", id)
-	}
-	sub.Status = status
-	sub.UpdatedAt = time.Now().UTC()
-	s.submissions[id] = sub
-	return nil
-}
-
-func (s *MemoryStore) UpdateSubmissionResult(ctx context.Context, id string, result domain.JudgeResult) error {
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	sub, ok := s.submissions[id]
-	if !ok {
-		return fmt.Errorf("submission %q not found", id)
-	}
-	result.Status = normalizeFinalStatus(result.Status)
-	sub.Status = result.Status
-	sub.Result = &result
-	sub.UpdatedAt = time.Now().UTC()
-	s.submissions[id] = sub
-	return nil
-}
-
 func normalizeFinalStatus(status domain.SubmissionStatus) domain.SubmissionStatus {
 	if status == "" {
 		return domain.StatusInternalError
