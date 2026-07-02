@@ -109,6 +109,8 @@ Acceptance:
 
 ## Phase 5: Frontend Demo
 
+Status: implemented.
+
 Goal: provide a complete product demo without hiding backend complexity.
 
 Tasks:
@@ -122,6 +124,7 @@ Tasks:
 Acceptance:
 
 - A reviewer can run Compose and complete the full user flow from browser.
+- Playwright covers Go, C++ and Python accepted submissions plus desktop/mobile layout behavior.
 
 ## Phase 6: Product Extensions
 
@@ -142,11 +145,19 @@ Acceptance:
 
 ## Current Development Slice
 
-The backend MVP slice is complete. The next optional slice is the browser demo in Phase 5.
+The backend MVP and Phase 5 browser demo are complete. The next optional slice is Phase 6 product extensions.
 
 Reason:
 
 - The API, PostgreSQL persistence, Redis reliability and Docker sandbox have been exercised together through Compose.
 - Go, C++ and Python accepted submissions have passed end-to-end.
 - Wrong answer, runtime error, timeout and dead-letter paths have been exercised end-to-end.
-- Frontend work can now consume a stable API without moving code execution into the API process.
+- The Next.js workbench supports problem navigation, Monaco editing, status polling and submission history.
+- Playwright verifies browser submissions and responsive desktop/mobile layouts.
+
+Not yet implemented:
+
+- Authentication and user accounts.
+- Contests, leaderboards and administration.
+- MinIO-backed test-case storage.
+- Prometheus metrics and dashboards.

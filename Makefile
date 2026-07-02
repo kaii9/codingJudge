@@ -2,11 +2,23 @@ GOCACHE_DIR := $(CURDIR)/.cache/go-build
 
 JUDGE_IMAGES := golang:1.25-alpine python:3.12-alpine gcc:13
 
-.PHONY: test build run-api run-worker judge-images compose-up compose-down
+.PHONY: test frontend-deps frontend-test frontend-build test-all build run-api run-worker judge-images compose-up compose-down
 
 test:
 	mkdir -p $(GOCACHE_DIR)
 	GOCACHE=$(GOCACHE_DIR) go test ./...
+
+frontend-deps:
+	npm --prefix frontend ci
+
+frontend-test: frontend-deps
+	npm --prefix frontend run test:run
+
+frontend-build: frontend-deps
+	npm --prefix frontend run build
+
+test-all: test
+	$(MAKE) frontend-test frontend-build
 
 build:
 	go build -o bin/api ./cmd/api
