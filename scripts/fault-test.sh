@@ -4,12 +4,24 @@ set -euo pipefail
 api_url="${API_URL:-http://localhost:18080}"
 lease_wait="${LEASE_WAIT_SECONDS:-35}"
 
-docker compose up -d --build --scale worker=1
-original_worker="$(docker compose ps -q worker | head -n 1)"
-if [[ -z "$original_worker" ]]; then
-  echo "worker container was not created" >&2
+docker compose up -d --build --scale worker=2
+workers=($(docker compose ps -q worker))
+if [[ "${#workers[@]}" -lt 2 ]]; then
+  echo "two worker containers were not created" >&2
   exit 1
 fi
+original_worker="${workers[0]}"
+standby_worker="${workers[1]}"
+cleanup() {
+  if [[ -n "${original_worker:-}" ]]; then
+    docker unpause "$original_worker" >/dev/null 2>&1 || true
+  fi
+  if [[ -n "${standby_worker:-}" ]]; then
+    docker start "$standby_worker" >/dev/null 2>&1 || true
+  fi
+}
+trap cleanup EXIT
+docker stop "$standby_worker" >/dev/null
 
 payload='{"problemId":"sum","language":"python","code":"while True:\n    pass"}'
 submission_id="$(curl --fail --silent --show-error -X POST "$api_url/submissions" \
@@ -32,9 +44,10 @@ if [[ "${status:-}" != "running" ]]; then
 fi
 
 docker pause "$original_worker" >/dev/null
-docker compose up -d --scale worker=2
+docker start "$standby_worker" >/dev/null
 sleep "$lease_wait"
 docker rm -f "$original_worker" >/dev/null
+original_worker=""
 
 for _ in $(seq 1 120); do
   status="$(curl --fail --silent "$api_url/submissions/$submission_id" | sed -n 's/.*"status":"\([^"]*\)".*/\1/p')"

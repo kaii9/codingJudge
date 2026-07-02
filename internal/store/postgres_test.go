@@ -7,7 +7,7 @@ import (
 	"github.com/kai/codingjudge/internal/domain"
 )
 
-func TestScanSubmissionIncludesCodeForDispatcher(t *testing.T) {
+func TestScanSubmissionIncludesCodeForWorker(t *testing.T) {
 	t.Parallel()
 
 	now := time.Now().UTC()

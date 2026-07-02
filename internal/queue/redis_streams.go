@@ -34,7 +34,7 @@ func NewRedisStreamsQueue(client *redis.Client, stream, group, consumer string) 
 		group = DefaultJudgeGroup
 	}
 	if consumer == "" {
-		consumer = "api-dispatcher"
+		consumer = "judge-worker"
 	}
 	return &RedisStreamsQueue{
 		client:       client,

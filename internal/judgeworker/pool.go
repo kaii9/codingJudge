@@ -10,6 +10,10 @@ type Slot interface {
 	Run(context.Context) error
 }
 
+type gracefulSlot interface {
+	RunGraceful(context.Context, context.Context) error
+}
+
 type Pool struct {
 	slots         []Slot
 	shutdownGrace time.Duration
@@ -23,17 +27,24 @@ func NewPool(slots []Slot, shutdownGrace time.Duration) *Pool {
 }
 
 func (p *Pool) Run(ctx context.Context) error {
-	workCtx, cancel := context.WithCancel(context.Background())
+	acquireCtx, cancelAcquire := context.WithCancel(context.Background())
+	workCtx, cancelWork := context.WithCancel(context.Background())
+	defer cancelAcquire()
+	defer cancelWork()
 	var wg sync.WaitGroup
 	for _, slot := range p.slots {
 		wg.Add(1)
 		go func(slot Slot) {
 			defer wg.Done()
+			if graceful, ok := slot.(gracefulSlot); ok {
+				_ = graceful.RunGraceful(acquireCtx, workCtx)
+				return
+			}
 			_ = slot.Run(workCtx)
 		}(slot)
 	}
 	<-ctx.Done()
-	cancel()
+	cancelAcquire()
 	done := make(chan struct{})
 	go func() {
 		wg.Wait()
@@ -42,6 +53,8 @@ func (p *Pool) Run(ctx context.Context) error {
 	select {
 	case <-done:
 	case <-time.After(p.shutdownGrace):
+		cancelWork()
+		<-done
 	}
 	return nil
 }

@@ -63,10 +63,22 @@ func NewProcessor(st store.LeaseStore, queue WorkerQueue, judge Judge, config Co
 }
 
 func (p *Processor) Run(ctx context.Context) error {
+	return p.RunGraceful(ctx, ctx)
+}
+
+func (p *Processor) RunGraceful(acquireCtx, workCtx context.Context) error {
 	for {
-		if err := p.ProcessOne(ctx); err != nil {
-			if ctx.Err() != nil {
-				return ctx.Err()
+		job, err := p.queue.Dequeue(acquireCtx)
+		if err != nil {
+			if acquireCtx.Err() != nil {
+				return acquireCtx.Err()
+			}
+			slog.Warn("judge job failed", "worker_id", p.config.WorkerID, "error", err)
+			continue
+		}
+		if err := p.ProcessJob(workCtx, job); err != nil {
+			if workCtx.Err() != nil {
+				return workCtx.Err()
 			}
 			slog.Warn("judge job failed", "worker_id", p.config.WorkerID, "error", err)
 		}
@@ -78,6 +90,10 @@ func (p *Processor) ProcessOne(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	return p.ProcessJob(ctx, job)
+}
+
+func (p *Processor) ProcessJob(ctx context.Context, job domain.Job) error {
 	token, err := p.config.Token()
 	if err != nil {
 		return fmt.Errorf("generate judge token: %w", err)
