@@ -47,11 +47,12 @@ Web 后端只是外壳，真正的难点是安全地运行不可信代码。
 - `GET /healthz` 返回健康状态。
 - `GET /problems` 返回题目列表，不暴露隐藏测试用例。
 - `GET /problems/{id}` 返回题目详情，不暴露隐藏测试用例。
-- `POST /submissions` 创建提交，状态为 `queued`，并写入判题队列。
+- `POST /submissions` 在一个 PostgreSQL 事务中创建 `queued` 提交和 outbox 事件。
 - `GET /submissions` 返回提交记录列表，默认按更新时间倒序。
 - `GET /submissions/{id}` 返回提交状态和结果，不返回用户代码。
-- API 启动 dispatcher，把队列任务发送给独立 worker。
-- worker 提供 `POST /judge` 内部接口，运行 Docker sandbox 并返回标准结果。
+- API 启动 outbox relay，把持久化事件可靠发布到 Redis，但不消费判题任务。
+- 多个 worker 直接消费 Redis，持有 PostgreSQL 租约后运行 Docker sandbox。
+- fencing token 阻止旧 worker 或重复消息覆盖当前结果。
 - Redis Streams 任务只在结果成功持久化后确认；失败任务最多重试三次，然后进入死信流。
 
 ### Future
@@ -68,7 +69,7 @@ Web 后端只是外壳，真正的难点是安全地运行不可信代码。
 - 安全：worker 必须禁用网络、限制 CPU/内存/进程数、只读文件系统、丢弃 Linux capabilities。
 - 资源：编译和运行阶段分离，单个 stdout/stderr 捕获上限为 1 MiB。
 - 隔离：API 服务不得直接执行用户代码。
-- 可测试：核心 store、queue、dispatcher、judge、HTTP handler 都需要 Go testing 覆盖。
+- 可测试：核心 store、queue、outbox、judgeworker、judge、HTTP handler 都需要 Go testing 覆盖。
 - 可演进：内存 store 和 queue 必须通过接口抽象，方便替换 PostgreSQL/sqlc 和 Redis Streams。
 - 可部署：Docker Compose 一键启动 API 与 worker。
 - 可观察：使用 `slog`，后续增加 Prometheus metrics。

@@ -21,7 +21,7 @@ Docs: OpenAPI
 Observability: slog; Prometheus metrics planned
 ```
 
-测试和单进程开发可以使用内存 store 和内存 queue。设置 `DATABASE_URL` 后 API 使用 PostgreSQL store；设置 `REDIS_ADDR` 后 API 使用 Redis Streams queue。
+单元测试和只读写 API 演示可以使用内存 store；跨进程判题要求同时设置 `DATABASE_URL` 和 `REDIS_ADDR`。只配置其中一项会启动失败，避免产生不完整的持久化链路。
 
 ## Architecture
 
@@ -29,16 +29,19 @@ Observability: slog; Prometheus metrics planned
 flowchart LR
     Browser[Browser] --> Frontend[Next.js frontend<br/>Monaco workbench]
     Frontend --> API[Go API<br/>net/http + chi]
-    API --> Store[(PostgreSQL<br/>memory store in unit tests)]
-    API --> Queue[Redis Streams<br/>memory queue in unit tests]
-    Queue --> Dispatcher[Dispatcher]
-    Dispatcher --> Worker[Judge worker<br/>internal HTTP]
-    Worker --> Docker[Docker sandbox<br/>network none, memory/cpu/pids limits]
-    Dispatcher --> Store
+    API --> Store[(PostgreSQL<br/>submissions + outbox)]
+    Store --> Relay[Outbox relay]
+    Relay --> Queue[Redis Streams<br/>consumer group]
+    Queue --> WorkerA[Judge worker A]
+    Queue --> WorkerB[Judge worker B]
+    WorkerA --> Store
+    WorkerB --> Store
+    WorkerA --> Docker[Docker sandbox<br/>network none, memory/cpu/pids limits]
+    WorkerB --> Docker
     MinIO[(MinIO<br/>integration planned)]
 ```
 
-前端只通过 API 创建和查询提交；API 服务不直接运行用户代码。API 保存提交并由 dispatcher 消费 Redis 任务，Docker 沙箱只在独立 worker 服务中执行。worker 应被视为高风险组件。当前 consumer group 扩展的是 dispatcher；多个 worker 需要放在负载均衡后的内部地址，或在后续版本中把 Redis 消费职责下沉到 worker。
+前端只通过 API 创建和查询提交；API 在一个 PostgreSQL 事务中保存 submission 和 outbox 事件，relay 负责可靠发布到 Redis，但不消费任务。多个 worker 直接通过同一 Consumer Group 抢任务，Docker 沙箱只在 worker 中执行。PostgreSQL 租约和 fencing token 决定最终写权限，避免重复消息或旧 worker 的迟到结果覆盖新结果。
 
 ## Quick Start
 
@@ -82,6 +85,18 @@ curl http://localhost:18080/healthz
 4. 在 Result 面板观察 Queued、Running 和终态结果。
 5. 打开 Submissions 查看提交历史。
 
+横向扩展 worker：
+
+```bash
+docker compose up -d --scale worker=3
+```
+
+已有 PostgreSQL 数据卷升级一次：
+
+```bash
+make migrate-reliable-workers
+```
+
 ## Frontend
 
 前端采用竞赛工作台方向，而不是营销式落地页。桌面端使用题目导航、题面/结果和代码编辑器分栏；窄屏使用 Problem、Code、Result 三个标签页。界面使用深海军蓝顶栏、黄色品牌强调、红色主操作和语义化状态色，优先保证信息密度、扫描效率和重复提交体验。
@@ -99,8 +114,8 @@ Mobile:
 | Service | Responsibility |
 | --- | --- |
 | `frontend` | Next.js standalone app and same-origin API proxy |
-| `api` | Problem/submission API, PostgreSQL persistence, Redis dispatcher |
-| `worker` | Isolated judge HTTP service and Docker runner |
+| `api` | Problem/submission API and transactional outbox relay |
+| `worker` | Redis consumer, PostgreSQL lease owner and isolated Docker runner |
 | `postgres` | Problems, test cases, submissions and results |
 | `redis` | Redis Streams judge queue |
 | `minio` | Object storage service; test-case integration remains planned |
@@ -181,7 +196,9 @@ Go 和 C++ 使用独立编译容器，编译上限为 10 秒和 512 MiB；编译
 
 ## Queue Reliability
 
-Redis Streams 使用 consumer group `judge-workers`。dispatcher 读取消息后保持 pending，只有判题结果成功写入 PostgreSQL 才执行 `XACK`。基础设施错误会重新入队并增加 `attempt`；第三次失败后写入 `judge:submissions:dead`，同时把 submission 更新为 `internal_error`。超过 30 秒的遗留 pending 消息通过 `XAUTOCLAIM` 交给当前 consumer 恢复处理。
+Redis Streams 使用 consumer group `judge-workers`。每个 worker slot 是独立 consumer，只有带有效 PostgreSQL 租约和 fencing token 的 worker 才能写结果，结果提交成功后才执行 `XACK`。基础设施错误最多重试三次，之后写入 `judge:submissions:dead` 并把 submission 更新为 `internal_error`；空闲 Pending 消息通过 `XAUTOCLAIM` 接管。
+
+系统提供 at-least-once 投递和幂等效果，而不宣称 exactly-once。API 使用 Transactional Outbox 消除 PostgreSQL/Redis 双写丢失窗口；重复 outbox 发布、ACK 前崩溃和 worker 迟到结果都由租约状态机安全处理。
 
 查看死信和 pending：
 
@@ -231,9 +248,9 @@ internal/domain/      shared domain models
 internal/httpapi/     net/http JSON API
 internal/store/       in-memory and PostgreSQL problem/submission stores
 internal/queue/       in-memory and reliable Redis Streams queues
-internal/dispatcher/  API-side async job dispatcher and worker client
+internal/outbox/      transactional outbox relay
 internal/judge/       judge service and Docker runner
-internal/workerapi/   worker HTTP API
+internal/judgeworker/ worker leases, heartbeat, retries and concurrency
 migrations/           PostgreSQL schema and seed data
 docs/openapi.yaml     API contract draft
 docs/plan.md          MVP plan
@@ -245,7 +262,8 @@ docs/screenshots/     desktop and mobile product screenshots
 1. 已完成：Go API、PostgreSQL、Redis Streams、独立 worker、Docker sandbox、Go/C++/Python 和提交记录。
 2. 已完成：成功后确认、重试、死信流、pending recovery、编译/运行分离和输出上限。
 3. 已完成：Next.js + Monaco 分栏工作台、状态轮询、提交历史、响应式布局和 Playwright E2E。
-4. 下一阶段：登录、比赛、排行榜、管理后台、SSE、Prometheus metrics 和 MinIO 测试用例集成。
+4. 已完成：Transactional Outbox、多 worker 直接消费、PostgreSQL 租约、fencing token 和故障接管。
+5. 下一阶段：Prometheus、压力测试、登录、比赛、排行榜、管理后台和 MinIO 测试用例集成。
 
 ## Resume Highlights
 
@@ -254,4 +272,6 @@ docs/screenshots/     desktop and mobile product screenshots
 - 使用 Go + chi 实现轻量 REST API，核心逻辑通过 Go testing 覆盖。
 - 支持 PostgreSQL store 与 Redis Streams queue，同时保留内存实现用于快速测试和本地开发。
 - 通过延迟 `XACK`、三次重试、死信流和 `XAUTOCLAIM` 实现至少一次任务处理与故障恢复。
+- 使用 Transactional Outbox 解决 PostgreSQL 与 Redis 双写一致性，并通过租约与 fencing token 拒绝重复执行的迟到结果。
+- 将 Redis Consumer Group 下沉到 judge worker，支持 `docker compose --scale worker=N` 横向扩展。
 - 使用 Next.js + Monaco 构建桌面分栏、移动标签式判题工作台，并以 Playwright 覆盖 Go/C++/Python 浏览器端到端流程。

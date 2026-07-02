@@ -15,7 +15,7 @@ Status: implemented.
 - Optional PostgreSQL store through `DATABASE_URL`.
 - Optional Redis Streams queue through `REDIS_ADDR`.
 - API endpoints for health, problems, submission creation and submission detail.
-- Dispatcher sends queued jobs to worker HTTP API.
+- API stores submissions and durable outbox intents; workers consume Redis directly.
 - Worker evaluates submissions through Docker sandbox.
 - Dockerfile, Docker Compose, Makefile, GitHub Actions.
 - README, OpenAPI draft, PostgreSQL migration draft.
@@ -83,7 +83,7 @@ Tasks:
 
 Acceptance:
 
-- Multiple dispatcher consumers can share the stream group without duplicate normal processing.
+- Multiple judge workers can share the stream group without competing result writes.
 - Failed jobs can be retried and eventually dead-lettered.
 
 ## Phase 4: Sandbox Hardening
@@ -126,7 +126,29 @@ Acceptance:
 - A reviewer can run Compose and complete the full user flow from browser.
 - Playwright covers Go, C++ and Python accepted submissions plus desktop/mobile layout behavior.
 
-## Phase 6: Product Extensions
+## Phase 6: Reliable Multi-Worker Judging
+
+Status: implemented.
+
+Goal: make publication and worker ownership recoverable under duplicate delivery and crashes.
+
+Tasks:
+
+- Add a PostgreSQL transactional outbox for submission publication.
+- Move Redis Consumer Group ownership from the API to judge workers.
+- Add PostgreSQL leases, heartbeats and fencing tokens.
+- Support multiple worker processes and per-process concurrency.
+- Reject stale result writes and recover idle Pending messages.
+- Add real PostgreSQL/Redis integration tests and a Compose fault test.
+
+Acceptance:
+
+- Committed submissions are eventually published after Redis recovery.
+- Duplicate jobs cannot create competing terminal results.
+- A killed worker's job is reclaimed after lease expiry.
+- API contains no user-code execution or judge-consumer path.
+
+## Phase 7: Product Extensions
 
 Goal: turn MVP into a richer judge platform.
 
@@ -145,11 +167,13 @@ Acceptance:
 
 ## Current Development Slice
 
-The backend MVP and Phase 5 browser demo are complete. The next optional slice is Phase 6 product extensions.
+The backend MVP, browser demo and reliable multi-worker phase are complete. The next recommended slice is observability and measured load testing before product extensions.
 
 Reason:
 
 - The API, PostgreSQL persistence, Redis reliability and Docker sandbox have been exercised together through Compose.
+- PostgreSQL outbox, leases and fencing tokens protect dual writes and stale workers.
+- Redis consumption runs directly in horizontally scalable judge workers.
 - Go, C++ and Python accepted submissions have passed end-to-end.
 - Wrong answer, runtime error, timeout and dead-letter paths have been exercised end-to-end.
 - The Next.js workbench supports problem navigation, Monaco editing, status polling and submission history.
