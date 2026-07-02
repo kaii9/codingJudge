@@ -2,7 +2,7 @@
 
 GoJudge 是一个后端主导的在线代码评测系统。项目核心围绕一句话：Web 后端只是外壳，真正的难点是安全地运行不可信代码。
 
-当前仓库实现了完整 MVP 主链路：浏览题目、Monaco 编辑代码、提交 Go/C++/Python、异步判题、轮询结果和查看提交历史。Compose 环境包含 Next.js 前端、Go API、独立 judge worker、PostgreSQL、Redis Streams 和 MinIO；Redis 消费支持成功后确认、三次重试、死信流和 pending 回收。无外部服务的本地测试默认使用内存 store 和内存 queue。
+当前仓库实现了完整 MVP 主链路：浏览题目、Monaco 编辑代码、提交 Go/C++/Python、异步判题、轮询结果和查看提交历史。题库包含 20 道原创面试高频题和 2 道 Starter 题，覆盖数组、哈希、滑动窗口、链表、树、图与动态规划。Compose 环境包含 Next.js 前端、Go API、独立 judge worker、PostgreSQL、Redis Streams 和 MinIO；Redis 消费支持成功后确认、三次重试、死信流和 pending 回收。无外部服务的本地测试默认使用内存 store 和内存 queue。
 
 ## Target Stack
 
@@ -95,11 +95,16 @@ docker compose up -d --scale worker=3
 
 ```bash
 make migrate-reliable-workers
+make migrate-hot20
 ```
+
+两个迁移命令都可重复执行。新建数据卷会在 PostgreSQL 初始化时自动应用全部迁移；已有数据卷需要手动执行新增迁移。
 
 ## Frontend
 
 前端采用竞赛工作台方向，而不是营销式落地页。桌面端使用题目导航、题面/结果和代码编辑器分栏；窄屏使用 Problem、Code、Result 三个标签页。界面使用深海军蓝顶栏、黄色品牌强调、红色主操作和语义化状态色，优先保证信息密度、扫描效率和重复提交体验。
+
+左侧题库支持 `Hot 20`、`Starter`、`All` 集合切换，可按标题或标签搜索并组合难度筛选。题目输入输出协议与多解排序规则见 [`docs/hot20-input-formats.md`](docs/hot20-input-formats.md)。
 
 Desktop:
 
@@ -263,7 +268,8 @@ docs/screenshots/     desktop and mobile product screenshots
 2. 已完成：成功后确认、重试、死信流、pending recovery、编译/运行分离和输出上限。
 3. 已完成：Next.js + Monaco 分栏工作台、状态轮询、提交历史、响应式布局和 Playwright E2E。
 4. 已完成：Transactional Outbox、多 worker 直接消费、PostgreSQL 租约、fencing token 和故障接管。
-5. 下一阶段：Prometheus、压力测试、登录、比赛、排行榜、管理后台和 MinIO 测试用例集成。
+5. 已完成：20 道精选题库、标准化难度/标签、每题至少 6 个隐藏用例和前端组合筛选。
+6. 下一阶段：Prometheus、压力测试、登录、比赛、排行榜、管理后台和 MinIO 测试用例集成。
 
 ## Resume Highlights
 
@@ -275,3 +281,4 @@ docs/screenshots/     desktop and mobile product screenshots
 - 使用 Transactional Outbox 解决 PostgreSQL 与 Redis 双写一致性，并通过租约与 fencing token 拒绝重复执行的迟到结果。
 - 将 Redis Consumer Group 下沉到 judge worker，支持 `docker compose --scale worker=N` 横向扩展。
 - 使用 Next.js + Monaco 构建桌面分栏、移动标签式判题工作台，并以 Playwright 覆盖 Go/C++/Python 浏览器端到端流程。
+- 设计 20+2 分层题库，以 PostgreSQL 标准化标签、幂等种子迁移和隐藏用例完整性测试保证可维护性。

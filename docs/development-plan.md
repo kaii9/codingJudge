@@ -148,7 +148,28 @@ Acceptance:
 - A killed worker's job is reclaimed after lease expiry.
 - API contains no user-code execution or judge-consumer path.
 
-## Phase 7: Product Extensions
+## Phase 7: Curated Problem Library
+
+Status: implemented.
+
+Goal: turn the sample-only catalog into a credible interview practice library.
+
+Tasks:
+
+- Add 20 original interview-style problems across arrays, linked lists, trees, graphs and dynamic programming.
+- Keep `sum` and `echo` as a separate Starter collection.
+- Normalize difficulty, collection order and topic tags in PostgreSQL.
+- Seed at least six deterministic hidden cases per curated problem through an idempotent migration.
+- Add collection, title/tag and difficulty filtering to the workbench.
+
+Acceptance:
+
+- PostgreSQL reports exactly 20 Hot problems and 2 Starter problems.
+- Every Hot problem has two-to-four tags and at least six hidden cases.
+- Existing database volumes can apply `make migrate-hot20` repeatedly without duplicates.
+- The frontend can combine collection, search and difficulty filters without horizontal overflow.
+
+## Phase 8: Product Extensions
 
 Goal: turn MVP into a richer judge platform.
 
@@ -167,7 +188,7 @@ Acceptance:
 
 ## Current Development Slice
 
-The backend MVP, browser demo and reliable multi-worker phase are complete. The next recommended slice is observability and measured load testing before product extensions.
+The backend MVP, browser demo, reliable multi-worker phase and curated problem library are complete. The next recommended slice is observability and measured load testing before product extensions.
 
 Reason:
 
@@ -177,6 +198,8 @@ Reason:
 - Go, C++ and Python accepted submissions have passed end-to-end.
 - Wrong answer, runtime error, timeout and dead-letter paths have been exercised end-to-end.
 - The Next.js workbench supports problem navigation, Monaco editing, status polling and submission history.
+- The catalog contains 20 curated interview problems plus 2 Starter problems with normalized metadata and hidden cases.
+- Collection, title/tag and difficulty filters keep the larger catalog navigable.
 - Playwright verifies browser submissions and responsive desktop/mobile layouts.
 
 Not yet implemented:

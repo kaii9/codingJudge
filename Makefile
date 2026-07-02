@@ -2,7 +2,7 @@ GOCACHE_DIR := $(CURDIR)/.cache/go-build
 
 JUDGE_IMAGES := golang:1.25-alpine python:3.12-alpine gcc:13
 
-.PHONY: test frontend-deps frontend-test frontend-build test-all build run-api run-worker judge-images compose-up compose-down compose-config migrate-reliable-workers fault-test
+.PHONY: test frontend-deps frontend-test frontend-build test-all build run-api run-worker judge-images compose-up compose-down compose-config migrate-reliable-workers migrate-hot20 fault-test
 
 test:
 	mkdir -p $(GOCACHE_DIR)
@@ -48,6 +48,9 @@ compose-config:
 
 migrate-reliable-workers:
 	docker compose exec -T postgres psql -U codingjudge -d codingjudge -v ON_ERROR_STOP=1 -f /docker-entrypoint-initdb.d/003_reliable_workers.sql
+
+migrate-hot20:
+	docker compose exec -T postgres psql -U codingjudge -d codingjudge -v ON_ERROR_STOP=1 -f /docker-entrypoint-initdb.d/004_hot20_problem_set.sql
 
 fault-test:
 	bash scripts/fault-test.sh
