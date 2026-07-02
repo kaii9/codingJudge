@@ -31,6 +31,29 @@ const (
 	StatusInternalError     SubmissionStatus = "internal_error"
 )
 
+func IsTerminalSubmissionStatus(status SubmissionStatus) bool {
+	switch status {
+	case StatusAccepted,
+		StatusWrongAnswer,
+		StatusRuntimeError,
+		StatusTimeLimitExceeded,
+		StatusInternalError:
+		return true
+	default:
+		return false
+	}
+}
+
+type ClaimState string
+
+const (
+	ClaimAcquired           ClaimState = "acquired"
+	ClaimTerminal           ClaimState = "terminal"
+	ClaimActiveSameReceipt  ClaimState = "active_same_receipt"
+	ClaimActiveOtherReceipt ClaimState = "active_other_receipt"
+	ClaimMissing            ClaimState = "missing"
+)
+
 type Problem struct {
 	ID            string     `json:"id"`
 	Title         string     `json:"title"`
@@ -67,6 +90,25 @@ type JudgeResult struct {
 
 type Job struct {
 	SubmissionID string `json:"submissionId"`
+	OutboxID     int64  `json:"-"`
 	Attempts     int    `json:"-"`
 	Receipt      string `json:"-"`
+}
+
+type OutboxEvent struct {
+	ID              int64
+	SubmissionID    string
+	ClaimToken      string
+	PublishAttempts int
+}
+
+type SubmissionClaim struct {
+	State          ClaimState
+	Submission     Submission
+	Token          string
+	WorkerID       string
+	Receipt        string
+	ActiveReceipt  string
+	LeaseExpiresAt time.Time
+	Attempts       int
 }
