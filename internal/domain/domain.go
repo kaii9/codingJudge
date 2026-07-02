@@ -4,6 +4,17 @@ import "time"
 
 type Language string
 
+type ProblemDifficulty string
+type ProblemCollection string
+
+const (
+	DifficultyEasy    ProblemDifficulty = "easy"
+	DifficultyMedium  ProblemDifficulty = "medium"
+	DifficultyHard    ProblemDifficulty = "hard"
+	CollectionStarter ProblemCollection = "starter"
+	CollectionHot20   ProblemCollection = "hot20"
+)
+
 const (
 	LanguageGo     Language = "go"
 	LanguageCPP    Language = "cpp"
@@ -55,13 +66,17 @@ const (
 )
 
 type Problem struct {
-	ID            string     `json:"id"`
-	Title         string     `json:"title"`
-	Description   string     `json:"description"`
-	Language      Language   `json:"language"`
-	TimeLimitMS   int        `json:"timeLimitMs"`
-	MemoryLimitMB int        `json:"memoryLimitMb"`
-	TestCases     []TestCase `json:"testCases,omitempty"`
+	ID            string            `json:"id"`
+	Title         string            `json:"title"`
+	Description   string            `json:"description"`
+	Language      Language          `json:"language"`
+	TimeLimitMS   int               `json:"timeLimitMs"`
+	MemoryLimitMB int               `json:"memoryLimitMb"`
+	Difficulty    ProblemDifficulty `json:"difficulty"`
+	Collection    ProblemCollection `json:"collection"`
+	SortOrder     int               `json:"sortOrder"`
+	Tags          []string          `json:"tags"`
+	TestCases     []TestCase        `json:"testCases,omitempty"`
 }
 
 type TestCase struct {
