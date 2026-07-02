@@ -14,13 +14,38 @@ type MemoryStore struct {
 	mu          sync.RWMutex
 	problems    map[string]domain.Problem
 	submissions map[string]domain.Submission
+	leases      map[string]memoryLease
+	outbox      map[int64]memoryOutbox
 	nextID      int
+	nextOutbox  int64
+}
+
+type memoryLease struct {
+	token     string
+	workerID  string
+	receipt   string
+	expiresAt time.Time
+	attempts  int
+	lastError string
+}
+
+type memoryOutbox struct {
+	id              int64
+	submissionID    string
+	publishedAt     *time.Time
+	claimedBy       string
+	claimExpiresAt  time.Time
+	publishAttempts int
+	nextAttemptAt   time.Time
+	lastError       string
 }
 
 func NewMemoryStore(problems []domain.Problem) *MemoryStore {
 	st := &MemoryStore{
 		problems:    make(map[string]domain.Problem, len(problems)),
 		submissions: make(map[string]domain.Submission),
+		leases:      make(map[string]memoryLease),
+		outbox:      make(map[int64]memoryOutbox),
 	}
 	for _, problem := range problems {
 		st.problems[problem.ID] = cloneProblem(problem)
@@ -73,6 +98,12 @@ func (s *MemoryStore) CreateSubmission(ctx context.Context, sub domain.Submissio
 	sub.CreatedAt = now
 	sub.UpdatedAt = now
 	s.submissions[sub.ID] = sub
+	s.nextOutbox++
+	s.outbox[s.nextOutbox] = memoryOutbox{
+		id:            s.nextOutbox,
+		submissionID:  sub.ID,
+		nextAttemptAt: now,
+	}
 	return sub, nil
 }
 
