@@ -17,10 +17,10 @@ type fakeEvaluator struct {
 	gotCode    string
 }
 
-func (f *fakeEvaluator) Evaluate(ctx context.Context, problem domain.Problem, language domain.Language, code string) domain.JudgeResult {
+func (f *fakeEvaluator) Evaluate(ctx context.Context, problem domain.Problem, language domain.Language, code string) (domain.JudgeResult, error) {
 	f.gotProblem = problem
 	f.gotCode = code
-	return domain.JudgeResult{Status: domain.StatusAccepted}
+	return domain.JudgeResult{Status: domain.StatusAccepted}, nil
 }
 
 func TestWorkerJudgeEndpointEvaluatesRequest(t *testing.T) {

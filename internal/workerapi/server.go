@@ -9,7 +9,7 @@ import (
 )
 
 type Evaluator interface {
-	Evaluate(context.Context, domain.Problem, domain.Language, string) domain.JudgeResult
+	Evaluate(context.Context, domain.Problem, domain.Language, string) (domain.JudgeResult, error)
 }
 
 type Server struct {
@@ -43,7 +43,11 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	result := s.evaluator.Evaluate(r.Context(), req.Problem, req.Language, req.Code)
+	result, err := s.evaluator.Evaluate(r.Context(), req.Problem, req.Language, req.Code)
+	if err != nil {
+		http.Error(w, "judge unavailable", http.StatusServiceUnavailable)
+		return
+	}
 	writeJSON(w, http.StatusOK, result)
 }
 
