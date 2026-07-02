@@ -10,10 +10,11 @@ import (
 func TestRedisStreamJobMappingRoundTrip(t *testing.T) {
 	t.Parallel()
 
-	job := domain.Job{SubmissionID: "sub-42", Attempts: 2}
+	job := domain.Job{SubmissionID: "sub-42", OutboxID: 7, Attempts: 2}
 	values := redisStreamValues(job)
 	got, err := redisStreamJob(map[string]any{
 		"submission_id": values["submission_id"],
+		"outbox_id":     values["outbox_id"],
 		"attempt":       values["attempt"],
 	})
 	if err != nil {

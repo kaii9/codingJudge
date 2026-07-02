@@ -19,10 +19,11 @@ const (
 )
 
 type RedisStreamsQueue struct {
-	client   *redis.Client
-	stream   string
-	group    string
-	consumer string
+	client       *redis.Client
+	stream       string
+	group        string
+	consumer     string
+	claimMinIdle time.Duration
 }
 
 func NewRedisStreamsQueue(client *redis.Client, stream, group, consumer string) *RedisStreamsQueue {
@@ -36,10 +37,11 @@ func NewRedisStreamsQueue(client *redis.Client, stream, group, consumer string) 
 		consumer = "api-dispatcher"
 	}
 	return &RedisStreamsQueue{
-		client:   client,
-		stream:   stream,
-		group:    group,
-		consumer: consumer,
+		client:       client,
+		stream:       stream,
+		group:        group,
+		consumer:     consumer,
+		claimMinIdle: 30 * time.Second,
 	}
 }
 
@@ -83,12 +85,32 @@ func (q *RedisStreamsQueue) Dequeue(ctx context.Context) (domain.Job, error) {
 			for _, message := range stream.Messages {
 				job, err := redisMessageJob(message)
 				if err != nil {
-					return domain.Job{}, err
+					if deadErr := q.deadLetterMalformed(ctx, message, err); deadErr != nil {
+						return domain.Job{}, errors.Join(err, deadErr)
+					}
+					continue
 				}
 				return job, nil
 			}
 		}
 	}
+}
+
+func (q *RedisStreamsQueue) Touch(ctx context.Context, job domain.Job) error {
+	if job.Receipt == "" {
+		return fmt.Errorf("redis stream job missing receipt")
+	}
+	messages, err := q.client.XClaim(ctx, &redis.XClaimArgs{
+		Stream: q.stream, Group: q.group, Consumer: q.consumer,
+		MinIdle: 0, Messages: []string{job.Receipt},
+	}).Result()
+	if err != nil {
+		return err
+	}
+	if len(messages) == 0 {
+		return fmt.Errorf("redis stream job %q no longer pending", job.Receipt)
+	}
+	return nil
 }
 
 func (q *RedisStreamsQueue) Ack(ctx context.Context, job domain.Job) error {
@@ -102,21 +124,35 @@ func (q *RedisStreamsQueue) Retry(ctx context.Context, job domain.Job, cause err
 	if job.Receipt == "" {
 		return false, fmt.Errorf("redis stream job missing receipt")
 	}
-	receipt := job.Receipt
 	_, attempts := retryTarget(job)
 	deadLettered := attempts >= DefaultMaxAttempts
-	target := q.stream
 	if deadLettered {
-		target = q.stream + ":dead"
+		return true, q.DeadLetter(ctx, job, attempts, cause)
 	}
-	job.Attempts = attempts
+	return false, q.RetryJob(ctx, job, attempts, cause)
+}
+
+func (q *RedisStreamsQueue) RetryJob(ctx context.Context, job domain.Job, attempt int, cause error) error {
+	return q.moveAndAck(ctx, q.stream, job, attempt, cause)
+}
+
+func (q *RedisStreamsQueue) DeadLetter(ctx context.Context, job domain.Job, attempt int, cause error) error {
+	return q.moveAndAck(ctx, q.stream+":dead", job, attempt, cause)
+}
+
+func (q *RedisStreamsQueue) moveAndAck(ctx context.Context, target string, job domain.Job, attempt int, cause error) error {
+	if job.Receipt == "" {
+		return fmt.Errorf("redis stream job missing receipt")
+	}
+	receipt := job.Receipt
+	job.Attempts = attempt
 	job.Receipt = ""
 
 	pipe := q.client.TxPipeline()
 	pipe.XAdd(ctx, &redis.XAddArgs{Stream: target, Values: retryStreamValues(job, cause)})
 	pipe.XAck(ctx, q.stream, q.group, receipt)
 	_, err := pipe.Exec(ctx)
-	return deadLettered, err
+	return err
 }
 
 func (q *RedisStreamsQueue) claimPending(ctx context.Context) (domain.Job, bool, error) {
@@ -124,7 +160,7 @@ func (q *RedisStreamsQueue) claimPending(ctx context.Context) (domain.Job, bool,
 		Stream:   q.stream,
 		Group:    q.group,
 		Consumer: q.consumer,
-		MinIdle:  30 * time.Second,
+		MinIdle:  q.claimMinIdle,
 		Start:    "0-0",
 		Count:    1,
 	}).Result()
@@ -135,12 +171,32 @@ func (q *RedisStreamsQueue) claimPending(ctx context.Context) (domain.Job, bool,
 		return domain.Job{}, false, nil
 	}
 	job, err := redisMessageJob(messages[0])
-	return job, err == nil, err
+	if err != nil {
+		if deadErr := q.deadLetterMalformed(ctx, messages[0], err); deadErr != nil {
+			return domain.Job{}, false, errors.Join(err, deadErr)
+		}
+		return domain.Job{}, false, nil
+	}
+	return job, true, nil
+}
+
+func (q *RedisStreamsQueue) deadLetterMalformed(ctx context.Context, message redis.XMessage, cause error) error {
+	values := make(map[string]any, len(message.Values)+1)
+	for key, value := range message.Values {
+		values[key] = value
+	}
+	values["parse_error"] = cause.Error()
+	pipe := q.client.TxPipeline()
+	pipe.XAdd(ctx, &redis.XAddArgs{Stream: q.stream + ":dead", Values: values})
+	pipe.XAck(ctx, q.stream, q.group, message.ID)
+	_, err := pipe.Exec(ctx)
+	return err
 }
 
 func redisStreamValues(job domain.Job) map[string]any {
 	return map[string]any{
 		"submission_id": job.SubmissionID,
+		"outbox_id":     job.OutboxID,
 		"attempt":       job.Attempts,
 	}
 }
@@ -166,7 +222,31 @@ func redisStreamJob(values map[string]any) (domain.Job, error) {
 	if err != nil {
 		return domain.Job{}, err
 	}
-	return domain.Job{SubmissionID: submissionID, Attempts: attempts}, nil
+	outboxID, err := redisStreamInt64(values["outbox_id"])
+	if err != nil {
+		return domain.Job{}, fmt.Errorf("redis stream job has invalid outbox_id: %w", err)
+	}
+	return domain.Job{SubmissionID: submissionID, OutboxID: outboxID, Attempts: attempts}, nil
+}
+
+func redisStreamInt64(raw any) (int64, error) {
+	if raw == nil {
+		return 0, nil
+	}
+	switch value := raw.(type) {
+	case int:
+		return int64(value), nil
+	case int64:
+		return value, nil
+	case string:
+		parsed, err := strconv.ParseInt(value, 10, 64)
+		if err != nil || parsed < 0 {
+			return 0, fmt.Errorf("invalid non-negative integer")
+		}
+		return parsed, nil
+	default:
+		return 0, fmt.Errorf("invalid integer type %T", raw)
+	}
 }
 
 func redisMessageJob(message redis.XMessage) (domain.Job, error) {
