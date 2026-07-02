@@ -5,6 +5,8 @@ package store
 import (
 	"context"
 	"os"
+	"path/filepath"
+	"sort"
 	"sync"
 	"testing"
 	"time"
@@ -24,12 +26,16 @@ func integrationStore(t *testing.T) *PostgresStore {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, statement := range []string{
-		`DROP TABLE IF EXISTS judge_outbox, submissions, problem_test_cases, problems CASCADE`,
-		mustReadMigration(t, "../../migrations/001_init.sql"),
-		mustReadMigration(t, "../../migrations/002_seed.sql"),
-		mustReadMigration(t, "../../migrations/003_reliable_workers.sql"),
-	} {
+	files, err := filepath.Glob("../../migrations/*.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sort.Strings(files)
+	statements := []string{`DROP TABLE IF EXISTS problem_tags, judge_outbox, submissions, problem_test_cases, problems CASCADE`}
+	for _, file := range files {
+		statements = append(statements, mustReadMigration(t, file))
+	}
+	for _, statement := range statements {
 		if _, err := pool.Exec(ctx, statement); err != nil {
 			pool.Close()
 			t.Fatal(err)
@@ -37,6 +43,53 @@ func integrationStore(t *testing.T) *PostgresStore {
 	}
 	t.Cleanup(pool.Close)
 	return &PostgresStore{pool: pool}
+}
+
+func TestHot20SeedIntegrity(t *testing.T) {
+	st := integrationStore(t)
+	ctx := context.Background()
+	var hotCount, starterCount, caseCount int
+	if err := st.pool.QueryRow(ctx, `SELECT count(*) FROM problems WHERE collection='hot20'`).Scan(&hotCount); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.pool.QueryRow(ctx, `SELECT count(*) FROM problems WHERE collection='starter'`).Scan(&starterCount); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.pool.QueryRow(ctx, `SELECT count(*) FROM problem_test_cases tc JOIN problems p ON p.id=tc.problem_id WHERE p.collection='hot20'`).Scan(&caseCount); err != nil {
+		t.Fatal(err)
+	}
+	if hotCount != 20 || starterCount != 2 || caseCount < 120 {
+		t.Fatalf("hot=%d starter=%d cases=%d", hotCount, starterCount, caseCount)
+	}
+	rows, err := st.pool.Query(ctx, `
+		SELECT p.id, count(DISTINCT pt.tag), count(DISTINCT tc.id)
+		FROM problems p
+		LEFT JOIN problem_tags pt ON pt.problem_id=p.id
+		LEFT JOIN problem_test_cases tc ON tc.problem_id=p.id
+		WHERE p.collection='hot20'
+		GROUP BY p.id ORDER BY p.id`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	seen := 0
+	for rows.Next() {
+		var id string
+		var tags, cases int
+		if err := rows.Scan(&id, &tags, &cases); err != nil {
+			t.Fatal(err)
+		}
+		if tags < 2 || tags > 4 || cases < 6 {
+			t.Fatalf("%s has tags=%d cases=%d", id, tags, cases)
+		}
+		seen++
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	if seen != 20 {
+		t.Fatalf("validated %d hot problems", seen)
+	}
 }
 
 func mustReadMigration(t *testing.T, path string) string {
