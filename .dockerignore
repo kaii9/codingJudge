@@ -1,6 +1,8 @@
 .cache/
 .history/
 .git/
+.worktrees/
+worktrees/
 .DS_Store
 **/.DS_Store
 bin/
