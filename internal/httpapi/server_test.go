@@ -8,11 +8,9 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/kai/codingjudge/internal/domain"
 	"github.com/kai/codingjudge/internal/httpapi"
-	"github.com/kai/codingjudge/internal/queue"
 	"github.com/kai/codingjudge/internal/store"
 )
 
@@ -64,12 +62,11 @@ func TestListProblemsDoesNotExposeTestCases(t *testing.T) {
 	}
 }
 
-func TestCreateSubmissionQueuesJudgeJob(t *testing.T) {
+func TestCreateSubmissionPersistsQueuedSubmission(t *testing.T) {
 	t.Parallel()
 
-	q := queue.NewMemoryQueue(1)
 	st := store.NewMemoryStore(testProblems())
-	server := httpapi.NewServer(st, q)
+	server := httpapi.NewServer(st)
 
 	payload := []byte(`{"problemId":"sum","language":"go","code":"package main\nfunc main(){}"}`)
 	req := httptest.NewRequest(http.MethodPost, "/submissions", bytes.NewReader(payload))
@@ -88,14 +85,9 @@ func TestCreateSubmissionQueuesJudgeJob(t *testing.T) {
 		t.Fatalf("created submission = %+v", created)
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-	defer cancel()
-	job, err := q.Dequeue(ctx)
-	if err != nil {
-		t.Fatalf("Dequeue returned error: %v", err)
-	}
-	if job.SubmissionID != created.ID {
-		t.Fatalf("job submission = %q, want %q", job.SubmissionID, created.ID)
+	stored, ok, err := st.GetSubmission(context.Background(), created.ID)
+	if err != nil || !ok || stored.Status != domain.StatusQueued {
+		t.Fatalf("stored submission = %+v, %v, %v", stored, ok, err)
 	}
 }
 
@@ -154,7 +146,7 @@ func TestGetSubmissionReturnsStoredSubmission(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateSubmission returned error: %v", err)
 	}
-	server := httpapi.NewServer(st, queue.NewMemoryQueue(1))
+	server := httpapi.NewServer(st)
 
 	req := httptest.NewRequest(http.MethodGet, "/submissions/"+sub.ID, nil)
 	rec := httptest.NewRecorder()
@@ -193,7 +185,7 @@ func TestListSubmissionsReturnsHistoryWithoutCode(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateSubmission second returned error: %v", err)
 	}
-	server := httpapi.NewServer(st, queue.NewMemoryQueue(1))
+	server := httpapi.NewServer(st)
 
 	req := httptest.NewRequest(http.MethodGet, "/submissions", nil)
 	rec := httptest.NewRecorder()
@@ -219,7 +211,7 @@ func TestListSubmissionsReturnsHistoryWithoutCode(t *testing.T) {
 }
 
 func newTestServer() http.Handler {
-	return httpapi.NewServer(store.NewMemoryStore(testProblems()), queue.NewMemoryQueue(1))
+	return httpapi.NewServer(store.NewMemoryStore(testProblems()))
 }
 
 func testProblems() []domain.Problem {

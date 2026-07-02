@@ -53,9 +53,9 @@ internal/domain/
 internal/httpapi/
 internal/store/
 internal/queue/
-internal/dispatcher/
+internal/outbox/
 internal/judge/
-internal/workerapi/
+internal/judgeworker/
 docs/
 migrations/
 README.md
@@ -80,11 +80,14 @@ Makefile
 用户提交代码
 API 创建 submission
 submission 状态设为 queued
-任务进入 judge queue
-worker 拉取任务
+同一事务写入 outbox
+relay 将任务发布到 judge queue
+多个 worker 通过 Consumer Group 抢任务
+worker 获取 PostgreSQL 租约和 fencing token
 worker 启动 Docker 容器执行代码
 比较 stdout 和 expected output
-保存 Accepted / Wrong Answer / Runtime Error / Time Limit Exceeded
+通过 token CAS 保存 Accepted / Wrong Answer / Runtime Error / Time Limit Exceeded
+结果落库后确认 Redis 消息
 用户查询结果
 ```
 

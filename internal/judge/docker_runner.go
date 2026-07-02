@@ -104,6 +104,9 @@ func (r *DockerRunner) RunBatch(ctx context.Context, req RunRequest, inputs []st
 		compileCtx, cancelCompile := context.WithTimeout(ctx, 10*time.Second)
 		compileResult, err := executeDocker(compileCtx, compileArgs)
 		cancelCompile()
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
 		if err != nil {
 			return nil, err
 		}
@@ -145,7 +148,11 @@ func (r *DockerRunner) runPrepared(ctx context.Context, req RunRequest, workdir 
 	if r.image != "" {
 		args = replaceImage(args, r.image)
 	}
-	return executeDocker(runCtx, args)
+	result, err := executeDocker(runCtx, args)
+	if ctx.Err() != nil {
+		return result, ctx.Err()
+	}
+	return result, err
 }
 
 func executeDocker(ctx context.Context, args []string) (RunResult, error) {

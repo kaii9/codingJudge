@@ -22,18 +22,13 @@ type ProblemStore interface {
 	GetSubmission(context.Context, string) (domain.Submission, bool, error)
 }
 
-type JobQueue interface {
-	Enqueue(context.Context, domain.Job) error
-}
-
 type Server struct {
 	store  ProblemStore
-	queue  JobQueue
 	router http.Handler
 }
 
-func NewServer(store ProblemStore, queue JobQueue) *Server {
-	s := &Server{store: store, queue: queue}
+func NewServer(store ProblemStore) *Server {
+	s := &Server{store: store}
 	r := chi.NewRouter()
 	r.Get("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
@@ -127,10 +122,6 @@ func (s *Server) createSubmission(w http.ResponseWriter, r *http.Request) {
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "create submission")
-		return
-	}
-	if err := s.queue.Enqueue(r.Context(), domain.Job{SubmissionID: sub.ID}); err != nil {
-		writeError(w, http.StatusServiceUnavailable, "queue submission")
 		return
 	}
 	sub.Code = ""

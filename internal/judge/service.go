@@ -2,7 +2,6 @@ package judge
 
 import (
 	"context"
-	"errors"
 	"strings"
 
 	"github.com/kai/codingjudge/internal/domain"
@@ -40,9 +39,9 @@ func NewService(runner Runner) *Service {
 	return &Service{runner: runner}
 }
 
-func (s *Service) Evaluate(ctx context.Context, problem domain.Problem, language domain.Language, code string) domain.JudgeResult {
+func (s *Service) Evaluate(ctx context.Context, problem domain.Problem, language domain.Language, code string) (domain.JudgeResult, error) {
 	if len(problem.TestCases) == 0 {
-		return domain.JudgeResult{Status: domain.StatusAccepted}
+		return domain.JudgeResult{Status: domain.StatusAccepted}, nil
 	}
 	baseRequest := RunRequest{
 		Language:      language,
@@ -57,20 +56,20 @@ func (s *Service) Evaluate(ctx context.Context, problem domain.Problem, language
 		}
 		runs, err := runner.RunBatch(ctx, baseRequest, inputs)
 		if err != nil {
-			return judgeErrorResult(err)
+			return domain.JudgeResult{}, err
 		}
 		for i, run := range runs {
 			if i >= len(problem.TestCases) {
 				break
 			}
 			if result, finished := judgeRun(problem.TestCases[i], run); finished {
-				return result
+				return result, nil
 			}
 		}
 		if len(runs) != len(problem.TestCases) {
-			return domain.JudgeResult{Status: domain.StatusInternalError, Stderr: "runner returned incomplete results"}
+			return domain.JudgeResult{Status: domain.StatusInternalError, Stderr: "runner returned incomplete results"}, nil
 		}
-		return domain.JudgeResult{Status: domain.StatusAccepted}
+		return domain.JudgeResult{Status: domain.StatusAccepted}, nil
 	}
 
 	for _, tc := range problem.TestCases {
@@ -78,21 +77,13 @@ func (s *Service) Evaluate(ctx context.Context, problem domain.Problem, language
 		request.Input = tc.Input
 		run, err := s.runner.Run(ctx, request)
 		if err != nil {
-			return judgeErrorResult(err)
+			return domain.JudgeResult{}, err
 		}
 		if result, finished := judgeRun(tc, run); finished {
-			return result
+			return result, nil
 		}
 	}
-	return domain.JudgeResult{Status: domain.StatusAccepted}
-}
-
-func judgeErrorResult(err error) domain.JudgeResult {
-	status := domain.StatusRuntimeError
-	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
-		status = domain.StatusTimeLimitExceeded
-	}
-	return domain.JudgeResult{Status: status, Stderr: err.Error()}
+	return domain.JudgeResult{Status: domain.StatusAccepted}, nil
 }
 
 func judgeRun(tc domain.TestCase, run RunResult) (domain.JudgeResult, bool) {

@@ -7,12 +7,39 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    env:
+      TEST_DATABASE_URL: postgres://codingjudge:codingjudge@localhost:5432/codingjudge_test?sslmode=disable
+      TEST_REDIS_ADDR: localhost:6379
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: codingjudge_test
+          POSTGRES_USER: codingjudge
+          POSTGRES_PASSWORD: codingjudge
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U codingjudge -d codingjudge_test"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
           go-version: "1.25"
       - run: go test ./...
+      - run: go test -tags=integration ./internal/store ./internal/queue
 
   frontend:
     runs-on: ubuntu-latest

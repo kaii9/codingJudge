@@ -109,11 +109,27 @@ func (s *PostgresStore) CreateSubmission(ctx context.Context, sub domain.Submiss
 	sub.Status = domain.StatusQueued
 	sub.CreatedAt = now
 	sub.UpdatedAt = now
-	_, err := s.pool.Exec(ctx, `
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return domain.Submission{}, err
+	}
+	defer tx.Rollback(ctx)
+	if _, err = tx.Exec(ctx, `
 		INSERT INTO submissions (id, problem_id, language, code, status, created_at, updated_at)
 		VALUES ($1, $2, $3, $4, $5, $6, $7)
-	`, sub.ID, sub.ProblemID, sub.Language, sub.Code, sub.Status, sub.CreatedAt, sub.UpdatedAt)
-	return sub, err
+	`, sub.ID, sub.ProblemID, sub.Language, sub.Code, sub.Status, sub.CreatedAt, sub.UpdatedAt); err != nil {
+		return domain.Submission{}, err
+	}
+	if _, err = tx.Exec(ctx, `
+		INSERT INTO judge_outbox (submission_id)
+		VALUES ($1)
+	`, sub.ID); err != nil {
+		return domain.Submission{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return domain.Submission{}, err
+	}
+	return sub, nil
 }
 
 func (s *PostgresStore) ListSubmissions(ctx context.Context) ([]domain.Submission, error) {
@@ -152,25 +168,6 @@ func (s *PostgresStore) GetSubmission(ctx context.Context, id string) (domain.Su
 		return domain.Submission{}, false, err
 	}
 	return sub, true, nil
-}
-
-func (s *PostgresStore) UpdateSubmissionStatus(ctx context.Context, id string, status domain.SubmissionStatus) error {
-	_, err := s.pool.Exec(ctx, `
-		UPDATE submissions
-		SET status = $2, updated_at = now()
-		WHERE id = $1
-	`, id, status)
-	return err
-}
-
-func (s *PostgresStore) UpdateSubmissionResult(ctx context.Context, id string, result domain.JudgeResult) error {
-	result.Status = normalizeFinalStatus(result.Status)
-	_, err := s.pool.Exec(ctx, `
-		UPDATE submissions
-		SET status = $2, stdout = $3, stderr = $4, exit_code = $5, duration_ms = $6, updated_at = now()
-		WHERE id = $1
-	`, id, result.Status, result.Stdout, result.Stderr, result.ExitCode, result.Duration)
-	return err
 }
 
 type submissionScanner interface {

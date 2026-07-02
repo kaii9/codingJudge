@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -11,8 +12,8 @@ import (
 	"time"
 
 	"github.com/kai/codingjudge/internal/config"
-	"github.com/kai/codingjudge/internal/dispatcher"
 	"github.com/kai/codingjudge/internal/httpapi"
+	"github.com/kai/codingjudge/internal/outbox"
 	"github.com/kai/codingjudge/internal/problems"
 	"github.com/kai/codingjudge/internal/queue"
 	"github.com/kai/codingjudge/internal/store"
@@ -21,7 +22,10 @@ import (
 
 func main() {
 	cfg := config.Load(os.Getenv)
-
+	if err := config.ValidateAPI(cfg); err != nil {
+		slog.Error("invalid api configuration", "error", err)
+		os.Exit(1)
+	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
@@ -32,30 +36,27 @@ func main() {
 	}
 	defer cleanupStore()
 
-	q, err := buildQueue(ctx, cfg)
-	if err != nil {
-		slog.Error("queue setup failed", "error", err)
-		os.Exit(1)
-	}
-
-	if cfg.WorkerURL != "" {
-		client := dispatcher.NewHTTPJudgeClient(cfg.WorkerURL, &http.Client{Timeout: 30 * time.Second})
+	if cfg.QueueMode == config.QueueRedisStreams {
+		client := redis.NewClient(&redis.Options{Addr: cfg.RedisAddr})
+		defer client.Close()
+		relayID := processID("api")
+		publisher := queue.NewRedisStreamsQueue(client, queue.DefaultJudgeStream, queue.DefaultJudgeGroup, relayID)
+		relay := outbox.New(st, publisher, outbox.Config{RelayID: relayID})
 		go func() {
-			if err := dispatcher.New(st, q, client).Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
-				slog.Error("dispatcher stopped", "error", err)
+			if err := relay.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
+				slog.Error("outbox relay stopped", "error", err)
 			}
 		}()
-		slog.Info("judge dispatcher enabled", "worker_url", cfg.WorkerURL)
+		slog.Info("outbox relay enabled", "relay_id", relayID)
 	} else {
-		slog.Warn("WORKER_URL is empty; submissions will remain queued")
+		slog.Warn("memory mode has no cross-process judge relay")
 	}
 
 	server := &http.Server{
 		Addr:              cfg.APIAddr,
-		Handler:           httpapi.AccessLog(httpapi.NewServer(st, q), slog.Default()),
+		Handler:           httpapi.AccessLog(httpapi.NewServer(st), slog.Default()),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
-
 	go func() {
 		<-ctx.Done()
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -72,12 +73,7 @@ func main() {
 
 type appStore interface {
 	httpapi.ProblemStore
-	dispatcher.Store
-}
-
-type appQueue interface {
-	httpapi.JobQueue
-	dispatcher.Queue
+	store.OutboxStore
 }
 
 func buildStore(ctx context.Context, cfg config.Config) (appStore, func(), error) {
@@ -91,15 +87,7 @@ func buildStore(ctx context.Context, cfg config.Config) (appStore, func(), error
 	return store.NewMemoryStore(problems.SampleProblems()), func() {}, nil
 }
 
-func buildQueue(ctx context.Context, cfg config.Config) (appQueue, error) {
-	if cfg.QueueMode == config.QueueRedisStreams {
-		client := redis.NewClient(&redis.Options{Addr: cfg.RedisAddr})
-		q := queue.NewRedisStreamsQueue(client, queue.DefaultJudgeStream, queue.DefaultJudgeGroup, "api-dispatcher")
-		if err := q.Init(ctx); err != nil {
-			client.Close()
-			return nil, err
-		}
-		return q, nil
-	}
-	return queue.NewMemoryQueue(100), nil
+func processID(prefix string) string {
+	hostname, _ := os.Hostname()
+	return fmt.Sprintf("%s-%s-%d", prefix, hostname, os.Getpid())
 }

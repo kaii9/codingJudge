@@ -13,5 +13,5 @@ RUN apk add --no-cache ca-certificates docker-cli
 WORKDIR /app
 COPY --from=build /out/api /app/api
 COPY --from=build /out/worker /app/worker
-EXPOSE 8080 8081
+EXPOSE 8080
 CMD ["/app/api"]

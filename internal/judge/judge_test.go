@@ -2,6 +2,7 @@ package judge_test
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/kai/codingjudge/internal/domain"
@@ -10,9 +11,13 @@ import (
 
 type fakeRunner struct {
 	results []judge.RunResult
+	err     error
 }
 
 func (f *fakeRunner) Run(ctx context.Context, req judge.RunRequest) (judge.RunResult, error) {
+	if f.err != nil {
+		return judge.RunResult{}, f.err
+	}
 	if len(f.results) == 0 {
 		return judge.RunResult{}, nil
 	}
@@ -47,13 +52,16 @@ func TestServiceAcceptsWhenAllCasesMatch(t *testing.T) {
 		{Stdout: "7\n", ExitCode: 0},
 	}})
 
-	result := service.Evaluate(context.Background(), domain.Problem{
+	result, err := service.Evaluate(context.Background(), domain.Problem{
 		ID: "sum",
 		TestCases: []domain.TestCase{
 			{Input: "1 2\n", ExpectedOutput: "3\n"},
 			{Input: "3 4\n", ExpectedOutput: "7\n"},
 		},
 	}, domain.LanguageGo, "code")
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	if result.Status != domain.StatusAccepted {
 		t.Fatalf("status = %q, want %q", result.Status, domain.StatusAccepted)
@@ -68,13 +76,16 @@ func TestServiceUsesBatchRunnerOnceForAllTestCases(t *testing.T) {
 		{Stdout: "7\n"},
 	}}
 	service := judge.NewService(runner)
-	result := service.Evaluate(context.Background(), domain.Problem{
+	result, err := service.Evaluate(context.Background(), domain.Problem{
 		ID: "sum",
 		TestCases: []domain.TestCase{
 			{Input: "1 2\n", ExpectedOutput: "3\n"},
 			{Input: "3 4\n", ExpectedOutput: "7\n"},
 		},
 	}, domain.LanguageGo, "code")
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	if result.Status != domain.StatusAccepted {
 		t.Fatalf("status = %q, want %q", result.Status, domain.StatusAccepted)
@@ -94,12 +105,15 @@ func TestServiceReportsWrongAnswerOnFirstMismatch(t *testing.T) {
 		{Stdout: "4\n", ExitCode: 0},
 	}})
 
-	result := service.Evaluate(context.Background(), domain.Problem{
+	result, err := service.Evaluate(context.Background(), domain.Problem{
 		ID: "sum",
 		TestCases: []domain.TestCase{
 			{Input: "1 2\n", ExpectedOutput: "3\n"},
 		},
 	}, domain.LanguageGo, "code")
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	if result.Status != domain.StatusWrongAnswer {
 		t.Fatalf("status = %q, want %q", result.Status, domain.StatusWrongAnswer)
@@ -113,14 +127,29 @@ func TestServiceReportsTimeLimitExceeded(t *testing.T) {
 		{TimedOut: true, Stderr: "timeout"},
 	}})
 
-	result := service.Evaluate(context.Background(), domain.Problem{
+	result, err := service.Evaluate(context.Background(), domain.Problem{
 		ID: "loop",
 		TestCases: []domain.TestCase{
 			{Input: "", ExpectedOutput: ""},
 		},
 	}, domain.LanguageGo, "code")
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	if result.Status != domain.StatusTimeLimitExceeded {
 		t.Fatalf("status = %q, want %q", result.Status, domain.StatusTimeLimitExceeded)
+	}
+}
+
+func TestEvaluateReturnsRunnerInfrastructureError(t *testing.T) {
+	t.Parallel()
+	want := errors.New("docker daemon unavailable")
+	service := judge.NewService(&fakeRunner{err: want})
+	result, err := service.Evaluate(context.Background(), domain.Problem{
+		ID: "sum", TestCases: []domain.TestCase{{Input: "1 2\n", ExpectedOutput: "3\n"}},
+	}, domain.LanguageGo, "code")
+	if !errors.Is(err, want) || result.Status != "" {
+		t.Fatalf("result = %+v, error = %v", result, err)
 	}
 }
