@@ -60,6 +60,9 @@ func TestListProblemsDoesNotExposeTestCases(t *testing.T) {
 	if body[0]["id"] != "sum" {
 		t.Fatalf("problem id = %q, want sum", body[0]["id"])
 	}
+	if body[0]["difficulty"] != "easy" || body[0]["collection"] != "starter" {
+		t.Fatalf("problem metadata = %#v", body[0])
+	}
 }
 
 func TestCreateSubmissionPersistsQueuedSubmission(t *testing.T) {
@@ -222,6 +225,7 @@ func testProblems() []domain.Problem {
 		Language:      domain.LanguageGo,
 		TimeLimitMS:   1000,
 		MemoryLimitMB: 64,
+		Difficulty:    domain.DifficultyEasy, Collection: domain.CollectionStarter, SortOrder: 1, Tags: []string{"starter"},
 		TestCases: []domain.TestCase{
 			{Input: "1 2\n", ExpectedOutput: "3\n"},
 		},

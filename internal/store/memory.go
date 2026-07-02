@@ -66,6 +66,12 @@ func (s *MemoryStore) ListProblems(ctx context.Context) ([]domain.Problem, error
 		problems = append(problems, cloneProblem(problem))
 	}
 	sort.Slice(problems, func(i, j int) bool {
+		if problems[i].Collection != problems[j].Collection {
+			return problems[i].Collection == domain.CollectionHot20
+		}
+		if problems[i].SortOrder != problems[j].SortOrder {
+			return problems[i].SortOrder < problems[j].SortOrder
+		}
 		return problems[i].ID < problems[j].ID
 	})
 	return problems, nil

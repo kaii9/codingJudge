@@ -181,6 +181,10 @@ components:
         - language
         - timeLimitMs
         - memoryLimitMb
+        - difficulty
+        - collection
+        - sortOrder
+        - tags
       properties:
         id:
           type: string
@@ -197,6 +201,19 @@ components:
         memoryLimitMb:
           type: integer
           minimum: 1
+        difficulty:
+          type: string
+          enum: [easy, medium, hard]
+        collection:
+          type: string
+          enum: [starter, hot20]
+        sortOrder:
+          type: integer
+          minimum: 0
+        tags:
+          type: array
+          items:
+            type: string
     JudgeResult:
       type: object
       required:

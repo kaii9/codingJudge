@@ -32,9 +32,11 @@ func (s *PostgresStore) Close() {
 
 func (s *PostgresStore) ListProblems(ctx context.Context) ([]domain.Problem, error) {
 	rows, err := s.pool.Query(ctx, `
-		SELECT id, title, description, language, time_limit_ms, memory_limit_mb
-		FROM problems
-		ORDER BY id
+		SELECT p.id, p.title, p.description, p.language, p.time_limit_ms, p.memory_limit_mb,
+		       p.difficulty, p.collection, p.sort_order,
+		       COALESCE((SELECT array_agg(tag ORDER BY tag) FROM problem_tags WHERE problem_id=p.id), '{}')
+		FROM problems p
+		ORDER BY CASE WHEN p.collection='hot20' THEN 0 ELSE 1 END, p.sort_order, p.id
 	`)
 	if err != nil {
 		return nil, err
@@ -51,6 +53,7 @@ func (s *PostgresStore) ListProblems(ctx context.Context) ([]domain.Problem, err
 			&problem.Language,
 			&problem.TimeLimitMS,
 			&problem.MemoryLimitMB,
+			&problem.Difficulty, &problem.Collection, &problem.SortOrder, &problem.Tags,
 		); err != nil {
 			return nil, err
 		}
@@ -62,9 +65,11 @@ func (s *PostgresStore) ListProblems(ctx context.Context) ([]domain.Problem, err
 func (s *PostgresStore) GetProblem(ctx context.Context, id string) (domain.Problem, bool, error) {
 	var problem domain.Problem
 	err := s.pool.QueryRow(ctx, `
-		SELECT id, title, description, language, time_limit_ms, memory_limit_mb
-		FROM problems
-		WHERE id = $1
+		SELECT p.id, p.title, p.description, p.language, p.time_limit_ms, p.memory_limit_mb,
+		       p.difficulty, p.collection, p.sort_order,
+		       COALESCE((SELECT array_agg(tag ORDER BY tag) FROM problem_tags WHERE problem_id=p.id), '{}')
+		FROM problems p
+		WHERE p.id = $1
 	`, id).Scan(
 		&problem.ID,
 		&problem.Title,
@@ -72,6 +77,7 @@ func (s *PostgresStore) GetProblem(ctx context.Context, id string) (domain.Probl
 		&problem.Language,
 		&problem.TimeLimitMS,
 		&problem.MemoryLimitMB,
+		&problem.Difficulty, &problem.Collection, &problem.SortOrder, &problem.Tags,
 	)
 	if err != nil {
 		if err == pgx.ErrNoRows {
