@@ -2,7 +2,7 @@ GOCACHE_DIR := $(CURDIR)/.cache/go-build
 
 JUDGE_IMAGES := golang:1.25-alpine python:3.12-alpine gcc:13
 
-.PHONY: test frontend-deps frontend-test frontend-build test-all build run-api run-worker judge-images compose-up compose-down
+.PHONY: test frontend-deps frontend-test frontend-build test-all build run-api run-worker judge-images compose-up compose-down compose-config migrate-reliable-workers fault-test
 
 test:
 	mkdir -p $(GOCACHE_DIR)
@@ -25,10 +25,10 @@ build:
 	go build -o bin/worker ./cmd/worker
 
 run-api:
-	WORKER_URL=http://localhost:8081 go run ./cmd/api
+	go run ./cmd/api
 
 run-worker:
-	JUDGE_WORKDIR=/tmp/codingjudge-sandbox go run ./cmd/worker
+	DATABASE_URL='postgres://codingjudge:codingjudge@localhost:15432/codingjudge?sslmode=disable' REDIS_ADDR=localhost:16379 JUDGE_WORKDIR=/tmp/codingjudge-sandbox go run ./cmd/worker
 
 judge-images:
 	@for image in $(JUDGE_IMAGES); do \
@@ -41,3 +41,13 @@ compose-up: judge-images
 
 compose-down:
 	docker compose down
+
+compose-config:
+	docker compose config --quiet
+	@! docker compose config | grep -E 'WORKER_URL|WORKER_ADDR'
+
+migrate-reliable-workers:
+	docker compose exec -T postgres psql -U codingjudge -d codingjudge -v ON_ERROR_STOP=1 -f /docker-entrypoint-initdb.d/003_reliable_workers.sql
+
+fault-test:
+	bash scripts/fault-test.sh

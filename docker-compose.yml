@@ -4,14 +4,11 @@ services:
     command: ["/app/api"]
     environment:
       API_ADDR: ":8080"
-      WORKER_URL: "http://worker:8081"
       DATABASE_URL: "postgres://codingjudge:codingjudge@postgres:5432/codingjudge?sslmode=disable"
       REDIS_ADDR: "redis:6379"
     ports:
       - "18080:8080"
     depends_on:
-      worker:
-        condition: service_started
       postgres:
         condition: service_healthy
       redis:
@@ -51,8 +48,19 @@ services:
     build: .
     command: ["/app/worker"]
     environment:
-      WORKER_ADDR: ":8081"
+      DATABASE_URL: "postgres://codingjudge:codingjudge@postgres:5432/codingjudge?sslmode=disable"
+      REDIS_ADDR: "redis:6379"
+      WORKER_CONCURRENCY: "1"
+      JUDGE_LEASE_DURATION: "30s"
+      JUDGE_HEARTBEAT_INTERVAL: "10s"
+      JUDGE_MAX_ATTEMPTS: "3"
+      WORKER_SHUTDOWN_GRACE: "30s"
       JUDGE_WORKDIR: "/tmp/codingjudge-sandbox"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - /tmp/codingjudge-sandbox:/tmp/codingjudge-sandbox
