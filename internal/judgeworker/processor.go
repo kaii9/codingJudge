@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/kai/codingjudge/internal/domain"
@@ -59,6 +60,17 @@ func NewProcessor(st store.LeaseStore, queue WorkerQueue, judge Judge, config Co
 		config.Token = randomToken
 	}
 	return &Processor{store: st, queue: queue, judge: judge, config: config}
+}
+
+func (p *Processor) Run(ctx context.Context) error {
+	for {
+		if err := p.ProcessOne(ctx); err != nil {
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+			slog.Warn("judge job failed", "worker_id", p.config.WorkerID, "error", err)
+		}
+	}
 }
 
 func (p *Processor) ProcessOne(ctx context.Context) error {
