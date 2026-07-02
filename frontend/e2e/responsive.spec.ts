@@ -52,6 +52,12 @@ test.describe("responsive workbench", () => {
 
     await page.goto("/problems/sum");
     await expect(page.getByRole("heading", { name: /A\+B/ })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Starter" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    await expect(page.getByRole("searchbox", { name: "Search problems" })).toBeVisible();
+    await expect(page.getByRole("combobox", { name: "Difficulty" })).toBeVisible();
 
     const problem = await boxFor(page.locator("#workbench-problem-panel"));
     const code = await boxFor(page.locator("#workbench-code-panel"));

@@ -60,6 +60,10 @@ const sumProblem: Problem = {
   language: "go",
   timeLimitMs: 1000,
   memoryLimitMb: 64,
+  difficulty: "easy",
+  collection: "starter",
+  sortOrder: 1,
+  tags: ["math"],
 };
 
 const echoProblem: Problem = {
@@ -69,6 +73,10 @@ const echoProblem: Problem = {
   language: "python",
   timeLimitMs: 1500,
   memoryLimitMb: 128,
+  difficulty: "easy",
+  collection: "starter",
+  sortOrder: 2,
+  tags: ["string"],
 };
 
 const queuedSubmission: Submission = {

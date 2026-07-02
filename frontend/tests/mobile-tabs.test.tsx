@@ -61,6 +61,10 @@ const problem: Problem = {
   language: "go",
   timeLimitMs: 1000,
   memoryLimitMb: 64,
+  difficulty: "easy",
+  collection: "starter",
+  sortOrder: 1,
+  tags: ["math"],
 };
 
 const queuedSubmission: Submission = {

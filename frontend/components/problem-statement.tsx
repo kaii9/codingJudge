@@ -6,10 +6,19 @@ interface ProblemStatementProps {
 }
 
 export function ProblemStatement({ problem }: ProblemStatementProps) {
+  const difficulty =
+    problem.difficulty[0].toUpperCase() + problem.difficulty.slice(1);
+
   return (
     <article className="problem-statement" aria-labelledby="problem-title">
       <header>
         <h1 id="problem-title">{problem.title}</h1>
+        <div className="problem-statement__metadata">
+          <span data-difficulty={problem.difficulty}>{difficulty}</span>
+          {problem.tags.map((tag) => (
+            <span key={tag}>{tag}</span>
+          ))}
+        </div>
       </header>
 
       <section aria-labelledby="problem-limits-heading">
