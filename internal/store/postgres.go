@@ -109,11 +109,27 @@ func (s *PostgresStore) CreateSubmission(ctx context.Context, sub domain.Submiss
 	sub.Status = domain.StatusQueued
 	sub.CreatedAt = now
 	sub.UpdatedAt = now
-	_, err := s.pool.Exec(ctx, `
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return domain.Submission{}, err
+	}
+	defer tx.Rollback(ctx)
+	if _, err = tx.Exec(ctx, `
 		INSERT INTO submissions (id, problem_id, language, code, status, created_at, updated_at)
 		VALUES ($1, $2, $3, $4, $5, $6, $7)
-	`, sub.ID, sub.ProblemID, sub.Language, sub.Code, sub.Status, sub.CreatedAt, sub.UpdatedAt)
-	return sub, err
+	`, sub.ID, sub.ProblemID, sub.Language, sub.Code, sub.Status, sub.CreatedAt, sub.UpdatedAt); err != nil {
+		return domain.Submission{}, err
+	}
+	if _, err = tx.Exec(ctx, `
+		INSERT INTO judge_outbox (submission_id)
+		VALUES ($1)
+	`, sub.ID); err != nil {
+		return domain.Submission{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return domain.Submission{}, err
+	}
+	return sub, nil
 }
 
 func (s *PostgresStore) ListSubmissions(ctx context.Context) ([]domain.Submission, error) {
