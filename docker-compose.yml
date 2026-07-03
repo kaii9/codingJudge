@@ -155,6 +155,17 @@ services:
       timeout: 3s
       retries: 10
 
+  k6:
+    image: grafana/k6:2.0.0
+    profiles: [loadtest]
+    entrypoint: [""]
+    volumes:
+      - ./loadtest:/scripts:ro
+      - ./loadtest/results:/results
+    depends_on:
+      api:
+        condition: service_healthy
+
 volumes:
   postgres-data:
   minio-data:
