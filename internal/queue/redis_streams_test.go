@@ -2,10 +2,33 @@ package queue
 
 import (
 	"errors"
+	"sync"
 	"testing"
 
 	"github.com/kai/codingjudge/internal/domain"
 )
+
+type fakeQueueMetrics struct {
+	mu      sync.Mutex
+	actions []string
+	results []string
+}
+
+func (m *fakeQueueMetrics) ObserveQueueOperation(action, result string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.actions = append(m.actions, action)
+	m.results = append(m.results, result)
+}
+
+func TestQueueMetricsOptionCompiles(t *testing.T) {
+	// 验证 NewRedisStreamsQueue 选项模式编译通过。
+	metrics := &fakeQueueMetrics{}
+	q := NewRedisStreamsQueue(nil, "stream", "group", "consumer", WithMetrics(metrics))
+	if q == nil {
+		t.Fatal("expected non-nil queue")
+	}
+}
 
 func TestRedisStreamJobMappingRoundTrip(t *testing.T) {
 	t.Parallel()

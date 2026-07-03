@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"reflect"
+	"sync"
 	"testing"
 	"time"
 
@@ -11,10 +12,89 @@ import (
 	"github.com/kai/codingjudge/internal/outbox"
 )
 
+type fakeMetrics struct {
+	mu         sync.Mutex
+	results    []string
+	durationsSet []bool
+}
+
+func (m *fakeMetrics) ObserveOutboxPublish(result string, duration time.Duration) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.results = append(m.results, result)
+	m.durationsSet = append(m.durationsSet, duration > 0)
+}
+
+func TestRelayRecordsMetricOnSuccess(t *testing.T) {
+	now := time.Date(2026, 7, 2, 8, 0, 0, 0, time.UTC)
+	st := &fakeStore{events: []domain.OutboxEvent{{ID: 7, SubmissionID: "sub-1", ClaimToken: "api-1", PublishAttempts: 1}}}
+	pub := &fakePublisher{calls: &st.calls}
+	metrics := &fakeMetrics{}
+	relay := outbox.New(st, pub, outbox.Config{
+		RelayID:       "api-1",
+		BatchSize:     10,
+		ClaimDuration: 30 * time.Second,
+		Metrics:       metrics,
+	})
+	if err := relay.PublishBatch(context.Background(), now); err != nil {
+		t.Fatal(err)
+	}
+	metrics.mu.Lock()
+	defer metrics.mu.Unlock()
+	if len(metrics.results) != 1 || metrics.results[0] != "success" {
+		t.Fatalf("results = %v, want [success]", metrics.results)
+	}
+	if len(metrics.durationsSet) != 1 || !metrics.durationsSet[0] {
+		t.Fatal("expected positive duration")
+	}
+}
+
+func TestRelayRecordsMetricOnError(t *testing.T) {
+	now := time.Date(2026, 7, 2, 8, 0, 0, 0, time.UTC)
+	st := &fakeStore{events: []domain.OutboxEvent{{ID: 7, SubmissionID: "sub-1", ClaimToken: "api-1", PublishAttempts: 1}}}
+	pub := &fakePublisher{calls: &st.calls, err: errors.New("oops")}
+	metrics := &fakeMetrics{}
+	relay := outbox.New(st, pub, outbox.Config{
+		RelayID:       "api-1",
+		BatchSize:     10,
+		ClaimDuration: 30 * time.Second,
+		Metrics:       metrics,
+	})
+	_ = relay.PublishBatch(context.Background(), now)
+	metrics.mu.Lock()
+	defer metrics.mu.Unlock()
+	if len(metrics.results) != 1 || metrics.results[0] != "error" {
+		t.Fatalf("results = %v, want [error]", metrics.results)
+	}
+}
+
+func TestRelayRecordsMetricOnClaimLost(t *testing.T) {
+	now := time.Date(2026, 7, 2, 8, 0, 0, 0, time.UTC)
+	st := &fakeStore{
+		events:     []domain.OutboxEvent{{ID: 7, SubmissionID: "sub-1", ClaimToken: "api-1", PublishAttempts: 1}},
+		noMark:     true,
+	}
+	pub := &fakePublisher{calls: &st.calls}
+	metrics := &fakeMetrics{}
+	relay := outbox.New(st, pub, outbox.Config{
+		RelayID:       "api-1",
+		BatchSize:     10,
+		ClaimDuration: 30 * time.Second,
+		Metrics:       metrics,
+	})
+	_ = relay.PublishBatch(context.Background(), now)
+	metrics.mu.Lock()
+	defer metrics.mu.Unlock()
+	if len(metrics.results) != 1 || metrics.results[0] != "claim_lost" {
+		t.Fatalf("results = %v, want [claim_lost]", metrics.results)
+	}
+}
+
 type fakeStore struct {
 	events []domain.OutboxEvent
 	calls  []string
 	next   time.Time
+	noMark bool
 }
 
 func (s *fakeStore) ClaimOutbox(context.Context, string, time.Time, time.Duration, int) ([]domain.OutboxEvent, error) {
@@ -22,6 +102,10 @@ func (s *fakeStore) ClaimOutbox(context.Context, string, time.Time, time.Duratio
 	return s.events, nil
 }
 func (s *fakeStore) MarkOutboxPublished(context.Context, int64, string, time.Time) (bool, error) {
+	if s.noMark {
+		s.calls = append(s.calls, "published")
+		return false, nil
+	}
 	s.calls = append(s.calls, "published")
 	return true, nil
 }

@@ -15,11 +15,17 @@ type Publisher interface {
 	Enqueue(context.Context, domain.Job) error
 }
 
+// Metrics records outbox publication outcomes.
+type Metrics interface {
+	ObserveOutboxPublish(result string, duration time.Duration)
+}
+
 type Config struct {
 	RelayID       string
 	BatchSize     int
 	ClaimDuration time.Duration
 	PollInterval  time.Duration
+	Metrics       Metrics
 }
 
 type Relay struct {
@@ -51,6 +57,7 @@ func (r *Relay) PublishBatch(ctx context.Context, now time.Time) error {
 	}
 	var batchErr error
 	for _, event := range events {
+		started := time.Now()
 		job := domain.Job{SubmissionID: event.SubmissionID, OutboxID: event.ID}
 		if err := r.publisher.Enqueue(ctx, job); err != nil {
 			nextAttempt := now.Add(publishBackoff(event.PublishAttempts))
@@ -59,13 +66,26 @@ func (r *Relay) PublishBatch(ctx context.Context, now time.Time) error {
 			} else {
 				batchErr = errors.Join(batchErr, fmt.Errorf("publish outbox %d: %w", event.ID, err))
 			}
+			if r.config.Metrics != nil {
+				r.config.Metrics.ObserveOutboxPublish("error", time.Since(started))
+			}
 			continue
 		}
 		ok, err := r.store.MarkOutboxPublished(ctx, event.ID, event.ClaimToken, now)
 		if err != nil {
 			batchErr = errors.Join(batchErr, fmt.Errorf("mark outbox %d published: %w", event.ID, err))
+			if r.config.Metrics != nil {
+				r.config.Metrics.ObserveOutboxPublish("error", time.Since(started))
+			}
 		} else if !ok {
 			batchErr = errors.Join(batchErr, fmt.Errorf("mark outbox %d published: claim lost", event.ID))
+			if r.config.Metrics != nil {
+				r.config.Metrics.ObserveOutboxPublish("claim_lost", time.Since(started))
+			}
+		} else {
+			if r.config.Metrics != nil {
+				r.config.Metrics.ObserveOutboxPublish("success", time.Since(started))
+			}
 		}
 	}
 	return batchErr

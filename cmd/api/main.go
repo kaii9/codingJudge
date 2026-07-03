@@ -50,8 +50,8 @@ func main() {
 		client := redis.NewClient(&redis.Options{Addr: cfg.RedisAddr})
 		defer client.Close()
 		relayID := processID("api")
-		publisher := queue.NewRedisStreamsQueue(client, queue.DefaultJudgeStream, queue.DefaultJudgeGroup, relayID)
-		relay := outbox.New(st, publisher, outbox.Config{RelayID: relayID})
+		publisher := queue.NewRedisStreamsQueue(client, queue.DefaultJudgeStream, queue.DefaultJudgeGroup, relayID, queue.WithMetrics(metricsApp))
+		relay := outbox.New(st, publisher, outbox.Config{RelayID: relayID, Metrics: metricsApp})
 		go func() {
 			if err := relay.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
 				slog.Error("outbox relay stopped", "error", err)

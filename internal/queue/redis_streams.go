@@ -18,15 +18,31 @@ const (
 	DefaultMaxAttempts      = 3
 )
 
+// Metrics records Redis stream queue operations.
+type Metrics interface {
+	ObserveQueueOperation(action, result string)
+}
+
+// RedisOption configures a RedisStreamsQueue.
+type RedisOption func(*RedisStreamsQueue)
+
+// WithMetrics sets the queue operation recorder. When nil, no metrics are recorded.
+func WithMetrics(m Metrics) RedisOption {
+	return func(q *RedisStreamsQueue) {
+		q.metrics = m
+	}
+}
+
 type RedisStreamsQueue struct {
 	client       *redis.Client
 	stream       string
 	group        string
 	consumer     string
 	claimMinIdle time.Duration
+	metrics      Metrics
 }
 
-func NewRedisStreamsQueue(client *redis.Client, stream, group, consumer string) *RedisStreamsQueue {
+func NewRedisStreamsQueue(client *redis.Client, stream, group, consumer string, options ...RedisOption) *RedisStreamsQueue {
 	if stream == "" {
 		stream = DefaultJudgeStream
 	}
@@ -36,13 +52,17 @@ func NewRedisStreamsQueue(client *redis.Client, stream, group, consumer string) 
 	if consumer == "" {
 		consumer = "judge-worker"
 	}
-	return &RedisStreamsQueue{
+	q := &RedisStreamsQueue{
 		client:       client,
 		stream:       stream,
 		group:        group,
 		consumer:     consumer,
 		claimMinIdle: 30 * time.Second,
 	}
+	for _, opt := range options {
+		opt(q)
+	}
+	return q
 }
 
 func (q *RedisStreamsQueue) Init(ctx context.Context) error {
@@ -54,10 +74,12 @@ func (q *RedisStreamsQueue) Init(ctx context.Context) error {
 }
 
 func (q *RedisStreamsQueue) Enqueue(ctx context.Context, job domain.Job) error {
-	return q.client.XAdd(ctx, &redis.XAddArgs{
+	err := q.client.XAdd(ctx, &redis.XAddArgs{
 		Stream: q.stream,
 		Values: redisStreamValues(job),
 	}).Err()
+	q.record("enqueue", err)
+	return err
 }
 
 func (q *RedisStreamsQueue) Dequeue(ctx context.Context) (domain.Job, error) {
@@ -79,6 +101,7 @@ func (q *RedisStreamsQueue) Dequeue(ctx context.Context) (domain.Job, error) {
 			if errors.Is(err, redis.Nil) {
 				continue
 			}
+			q.record("dequeue", err)
 			return domain.Job{}, err
 		}
 		for _, stream := range streams {
@@ -90,6 +113,7 @@ func (q *RedisStreamsQueue) Dequeue(ctx context.Context) (domain.Job, error) {
 					}
 					continue
 				}
+				q.record("dequeue", nil)
 				return job, nil
 			}
 		}
@@ -104,6 +128,7 @@ func (q *RedisStreamsQueue) Touch(ctx context.Context, job domain.Job) error {
 		Stream: q.stream, Group: q.group, Consumer: q.consumer,
 		MinIdle: 0, Messages: []string{job.Receipt},
 	}).Result()
+	q.record("touch", err)
 	if err != nil {
 		return err
 	}
@@ -117,7 +142,9 @@ func (q *RedisStreamsQueue) Ack(ctx context.Context, job domain.Job) error {
 	if job.Receipt == "" {
 		return fmt.Errorf("redis stream job missing receipt")
 	}
-	return q.client.XAck(ctx, q.stream, q.group, job.Receipt).Err()
+	err := q.client.XAck(ctx, q.stream, q.group, job.Receipt).Err()
+	q.record("ack", err)
+	return err
 }
 
 func (q *RedisStreamsQueue) Retry(ctx context.Context, job domain.Job, cause error) (bool, error) {
@@ -129,15 +156,20 @@ func (q *RedisStreamsQueue) Retry(ctx context.Context, job domain.Job, cause err
 	if deadLettered {
 		return true, q.DeadLetter(ctx, job, attempts, cause)
 	}
-	return false, q.RetryJob(ctx, job, attempts, cause)
+	err := q.RetryJob(ctx, job, attempts, cause)
+	q.record("retry", err)
+	return false, err
 }
 
 func (q *RedisStreamsQueue) RetryJob(ctx context.Context, job domain.Job, attempt int, cause error) error {
+	// 不在此处记录指标，避免 Retry → DeadLetter 路径重复计数。
 	return q.moveAndAck(ctx, q.stream, job, attempt, cause)
 }
 
 func (q *RedisStreamsQueue) DeadLetter(ctx context.Context, job domain.Job, attempt int, cause error) error {
-	return q.moveAndAck(ctx, q.stream+":dead", job, attempt, cause)
+	err := q.moveAndAck(ctx, q.stream+":dead", job, attempt, cause)
+	q.record("dead_letter", err)
+	return err
 }
 
 func (q *RedisStreamsQueue) moveAndAck(ctx context.Context, target string, job domain.Job, attempt int, cause error) error {
@@ -165,6 +197,7 @@ func (q *RedisStreamsQueue) claimPending(ctx context.Context) (domain.Job, bool,
 		Count:    1,
 	}).Result()
 	if err != nil && !errors.Is(err, redis.Nil) {
+		q.record("claim_pending", err)
 		return domain.Job{}, false, err
 	}
 	if len(messages) == 0 {
@@ -177,6 +210,7 @@ func (q *RedisStreamsQueue) claimPending(ctx context.Context) (domain.Job, bool,
 		}
 		return domain.Job{}, false, nil
 	}
+	q.record("claim_pending", nil)
 	return job, true, nil
 }
 
@@ -190,6 +224,7 @@ func (q *RedisStreamsQueue) deadLetterMalformed(ctx context.Context, message red
 	pipe.XAdd(ctx, &redis.XAddArgs{Stream: q.stream + ":dead", Values: values})
 	pipe.XAck(ctx, q.stream, q.group, message.ID)
 	_, err := pipe.Exec(ctx)
+	q.record("dead_letter_malformed", err)
 	return err
 }
 
@@ -284,6 +319,17 @@ func retryTarget(job domain.Job) (string, int) {
 		return DefaultDeadLetterStream, attempts
 	}
 	return DefaultJudgeStream, attempts
+}
+
+func (q *RedisStreamsQueue) record(action string, err error) {
+	if q.metrics == nil {
+		return
+	}
+	result := "success"
+	if err != nil {
+		result = "error"
+	}
+	q.metrics.ObserveQueueOperation(action, result)
 }
 
 func isRedisBusyGroup(err error) bool {
