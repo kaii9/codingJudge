@@ -13,7 +13,11 @@ import (
 	"github.com/kai/codingjudge/internal/store"
 )
 
-var ErrLeaseLost = errors.New("judge lease lost")
+var (
+	ErrLeaseLost  = errors.New("judge lease lost")
+	errDeadLetter = errors.New("dead letter")
+	errRetry      = errors.New("retry")
+)
 
 type WorkerQueue interface {
 	Dequeue(context.Context) (domain.Job, error)
@@ -120,10 +124,13 @@ func (p *Processor) ProcessJob(ctx context.Context, job domain.Job) error {
 	case domain.ClaimActiveSameReceipt:
 		return nil
 	case domain.ClaimMissing:
+		if err := p.queue.DeadLetter(ctx, job, job.Attempts, fmt.Errorf("submission %q not found", job.SubmissionID)); err != nil {
+			return err
+		}
 		if p.metrics != nil {
 			p.metrics.WorkerDeadLetter()
 		}
-		return p.queue.DeadLetter(ctx, job, job.Attempts, fmt.Errorf("submission %q not found", job.SubmissionID))
+		return nil
 	case domain.ClaimAcquired:
 		if p.metrics != nil {
 			p.metrics.WorkerJobStarted()
@@ -230,9 +237,6 @@ func (p *Processor) heartbeat(ctx context.Context, done <-chan struct{}, job dom
 
 func (p *Processor) handleInfrastructureError(ctx context.Context, job domain.Job, claim domain.SubmissionClaim, cause error) error {
 	if claim.Attempts >= p.config.MaxAttempts {
-		if p.metrics != nil {
-			p.metrics.WorkerDeadLetter()
-		}
 		result := domain.JudgeResult{Status: domain.StatusInternalError, Stderr: cause.Error()}
 		completed, err := p.store.CompleteSubmission(ctx, claim.Submission.ID, claim.Token, p.config.Now(), result)
 		if err != nil {
@@ -244,10 +248,10 @@ func (p *Processor) handleInfrastructureError(ctx context.Context, job domain.Jo
 		if err := p.queue.DeadLetter(ctx, job, claim.Attempts, cause); err != nil {
 			return errors.Join(cause, err)
 		}
-		return cause
-	}
-	if p.metrics != nil {
-		p.metrics.WorkerRetry()
+		if p.metrics != nil {
+			p.metrics.WorkerDeadLetter()
+		}
+		return fmt.Errorf("%w: %w", errDeadLetter, cause)
 	}
 	released, err := p.store.ReleaseSubmission(ctx, claim.Submission.ID, claim.Token, p.config.Now(), cause.Error())
 	if err != nil {
@@ -259,7 +263,10 @@ func (p *Processor) handleInfrastructureError(ctx context.Context, job domain.Jo
 	if err := p.queue.RetryJob(ctx, job, claim.Attempts, cause); err != nil {
 		return errors.Join(cause, err)
 	}
-	return cause
+	if p.metrics != nil {
+		p.metrics.WorkerRetry()
+	}
+	return fmt.Errorf("%w: %w", errRetry, cause)
 }
 
 // metricResult 将 JudgeResult 状态映射为 worker metrics 的 result 标签值。
@@ -268,13 +275,19 @@ func metricResult(result domain.JudgeResult, processErr error) string {
 		if errors.Is(processErr, ErrLeaseLost) {
 			return "lease_lost"
 		}
+		if errors.Is(processErr, errRetry) {
+			return "retry"
+		}
+		if errors.Is(processErr, errDeadLetter) {
+			return "dead_letter"
+		}
 		return "infrastructure_error"
 	}
 	if result.Status == "" {
 		return "accepted"
 	}
 	switch result.Status {
-	case domain.StatusAccepted, "":
+	case domain.StatusAccepted:
 		return "accepted"
 	case domain.StatusWrongAnswer:
 		return "wrong_answer"

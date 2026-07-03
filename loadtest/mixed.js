@@ -1,6 +1,8 @@
 import { createSubmission, pollUntilTerminal, findSumProblem, getProblem } from './lib/client.js';
 import { byLanguage } from './lib/programs.js';
 
+const languages = ['go', 'cpp', 'python'];
+
 export const options = {
   vus: parseInt(__ENV.K6_VUS) || 20,
   duration: __ENV.K6_DURATION || '2m',
@@ -24,9 +26,10 @@ export default function () {
   const problem = findSumProblem();
   if (!problem) return;
 
-  const lang = Math.random() < 0.5 ? 'go' : 'python';
-  const code = byLanguage(lang);
-  const sub = createSubmission(problem.id, lang, code);
+  // 确定性语言轮换。
+  const language = languages[(__VU + __ITER) % languages.length];
+  const code = byLanguage(language);
+  const sub = createSubmission(problem.id, language, code);
   if (sub && sub.id) {
     pollUntilTerminal(sub.id);
   }

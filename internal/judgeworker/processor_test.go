@@ -94,8 +94,8 @@ func TestProcessorRecordsRetryMetric(t *testing.T) {
 	if m.starts != 1 {
 		t.Errorf("starts = %d, want 1", m.starts)
 	}
-	if len(m.finishCalls) != 1 || m.finishCalls[0][1] != "infrastructure_error" {
-		t.Errorf("finish calls = %v", m.finishCalls)
+	if len(m.finishCalls) != 1 || m.finishCalls[0][1] != "retry" {
+		t.Errorf("finish calls = %v, want result=retry", m.finishCalls)
 	}
 }
 
@@ -120,8 +120,8 @@ func TestProcessorRecordsDeadLetterMetric(t *testing.T) {
 	if m.retries != 0 {
 		t.Errorf("retries should be 0 when dead-lettering, got %d", m.retries)
 	}
-	if len(m.finishCalls) != 1 || m.finishCalls[0][1] != "infrastructure_error" {
-		t.Errorf("finish calls = %v", m.finishCalls)
+	if len(m.finishCalls) != 1 || m.finishCalls[0][1] != "dead_letter" {
+		t.Errorf("finish calls = %v, want result=dead_letter", m.finishCalls)
 	}
 }
 
@@ -143,6 +143,86 @@ func TestProcessorRecordsWrongAnswerNotAccepted(t *testing.T) {
 	defer m.mu.Unlock()
 	if len(m.finishCalls) != 1 || m.finishCalls[0][1] != "wrong_answer" {
 		t.Errorf("finish calls = %v, want result=wrong_answer", m.finishCalls)
+	}
+}
+
+func TestProcessorSkipsRetryCounterOnReleaseFailure(t *testing.T) {
+	// 验证 ReleaseSubmission 失败时不增加 retry 计数器。
+	calls := []string{}
+	st := &fakeStore{claim: acquiredClaim(), problem: domain.Problem{ID: "sum"}, releaseOK: false, calls: &calls}
+	q := &fakeQueue{job: domain.Job{SubmissionID: "sub-1", Receipt: "1-0"}, calls: &calls}
+	j := &fakeJudge{err: errors.New("docker unavailable"), calls: &calls}
+	m := &fakeWorkerMetrics{}
+	p := judgeworker.NewProcessor(st, q, j, judgeworker.Config{
+		WorkerID: "worker-a", LeaseDuration: time.Minute, HeartbeatInterval: time.Hour,
+		MaxAttempts: 3, Token: func() (string, error) { return "token", nil }, Metrics: m,
+	})
+	_ = p.ProcessOne(context.Background())
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.retries != 0 {
+		t.Errorf("retries = %d, want 0 (release failed)", m.retries)
+	}
+}
+
+func TestProcessorSkipsDeadLetterCounterOnCompleteFailure(t *testing.T) {
+	// 验证 CompleteSubmission 失败时不增加 dead-letter 计数器。
+	calls := []string{}
+	claim := acquiredClaim()
+	claim.Attempts = 3
+	st := &fakeStore{claim: claim, problem: domain.Problem{ID: "sum"}, completeOK: false, calls: &calls}
+	q := &fakeQueue{job: domain.Job{SubmissionID: "sub-1", Receipt: "1-0"}, calls: &calls}
+	j := &fakeJudge{err: errors.New("docker unavailable"), calls: &calls}
+	m := &fakeWorkerMetrics{}
+	p := judgeworker.NewProcessor(st, q, j, judgeworker.Config{
+		WorkerID: "worker-a", LeaseDuration: time.Minute, HeartbeatInterval: time.Hour,
+		MaxAttempts: 3, Token: func() (string, error) { return "token", nil }, Metrics: m,
+	})
+	_ = p.ProcessOne(context.Background())
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.deadLetters != 0 {
+		t.Errorf("deadLetters = %d, want 0 (complete failed)", m.deadLetters)
+	}
+}
+
+func TestProcessorJobFinishedResultLabelForRetry(t *testing.T) {
+	// 验证 infrastructure retry 路径记录 result="retry"。
+	calls := []string{}
+	st := &fakeStore{claim: acquiredClaim(), problem: domain.Problem{ID: "sum"}, releaseOK: true, calls: &calls}
+	q := &fakeQueue{job: domain.Job{SubmissionID: "sub-1", Receipt: "1-0"}, calls: &calls}
+	j := &fakeJudge{err: errors.New("docker unavailable"), calls: &calls}
+	m := &fakeWorkerMetrics{}
+	p := judgeworker.NewProcessor(st, q, j, judgeworker.Config{
+		WorkerID: "worker-a", LeaseDuration: time.Minute, HeartbeatInterval: time.Hour,
+		MaxAttempts: 3, Token: func() (string, error) { return "token", nil }, Metrics: m,
+	})
+	_ = p.ProcessOne(context.Background())
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if len(m.finishCalls) != 1 || m.finishCalls[0][1] != "retry" {
+		t.Errorf("finish calls = %v, want result=retry", m.finishCalls)
+	}
+}
+
+func TestProcessorJobFinishedResultLabelForDeadLetter(t *testing.T) {
+	// 验证 dead-letter 路径记录 result="dead_letter"。
+	calls := []string{}
+	claim := acquiredClaim()
+	claim.Attempts = 3
+	st := &fakeStore{claim: claim, problem: domain.Problem{ID: "sum"}, completeOK: true, calls: &calls}
+	q := &fakeQueue{job: domain.Job{SubmissionID: "sub-1", Receipt: "1-0"}, calls: &calls}
+	j := &fakeJudge{err: errors.New("docker unavailable"), calls: &calls}
+	m := &fakeWorkerMetrics{}
+	p := judgeworker.NewProcessor(st, q, j, judgeworker.Config{
+		WorkerID: "worker-a", LeaseDuration: time.Minute, HeartbeatInterval: time.Hour,
+		MaxAttempts: 3, Token: func() (string, error) { return "token", nil }, Metrics: m,
+	})
+	_ = p.ProcessOne(context.Background())
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if len(m.finishCalls) != 1 || m.finishCalls[0][1] != "dead_letter" {
+		t.Errorf("finish calls = %v, want result=dead_letter", m.finishCalls)
 	}
 }
 
@@ -169,12 +249,14 @@ func TestProcessorRecordsTakeoverMetric(t *testing.T) {
 }
 
 type fakeStore struct {
-	claim      domain.SubmissionClaim
-	problem    domain.Problem
-	completeOK bool
-	releaseOK  bool
-	renewOK    bool
-	calls      *[]string
+	claim       domain.SubmissionClaim
+	problem     domain.Problem
+	completeOK  bool
+	releaseOK   bool
+	renewOK     bool
+	completeErr error
+	releaseErr  error
+	calls       *[]string
 }
 
 func (s *fakeStore) GetProblem(context.Context, string) (domain.Problem, bool, error) {
@@ -191,16 +273,18 @@ func (s *fakeStore) RenewSubmissionLease(context.Context, string, string, time.T
 }
 func (s *fakeStore) CompleteSubmission(context.Context, string, string, time.Time, domain.JudgeResult) (bool, error) {
 	*s.calls = append(*s.calls, "complete")
-	return s.completeOK, nil
+	return s.completeOK, s.completeErr
 }
 func (s *fakeStore) ReleaseSubmission(context.Context, string, string, time.Time, string) (bool, error) {
 	*s.calls = append(*s.calls, "release")
-	return s.releaseOK, nil
+	return s.releaseOK, s.releaseErr
 }
 
 type fakeQueue struct {
-	job   domain.Job
-	calls *[]string
+	job       domain.Job
+	calls     *[]string
+	retryErr  error
+	deadErr   error
 }
 
 func (q *fakeQueue) Dequeue(context.Context) (domain.Job, error) {
@@ -217,11 +301,11 @@ func (q *fakeQueue) Ack(context.Context, domain.Job) error {
 }
 func (q *fakeQueue) RetryJob(context.Context, domain.Job, int, error) error {
 	*q.calls = append(*q.calls, "retry")
-	return nil
+	return q.retryErr
 }
 func (q *fakeQueue) DeadLetter(context.Context, domain.Job, int, error) error {
 	*q.calls = append(*q.calls, "dead")
-	return nil
+	return q.deadErr
 }
 
 type fakeJudge struct {

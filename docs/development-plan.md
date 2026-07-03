@@ -171,7 +171,7 @@ Acceptance:
 
 ## Phase 8: Observability and Load Testing
 
-Status: implemented.
+Status: implemented. Real 1/2/4 worker benchmark captured.
 
 Goal: add application-level Prometheus metrics, a provisioned Grafana dashboard, and reproducible k6 benchmarks comparing one, two, and four judge workers.
 
@@ -226,7 +226,7 @@ Reason:
 - Collection, title/tag and difficulty filters keep the larger catalog navigable.
 - Playwright verifies browser submissions and responsive desktop/mobile layouts.
 - Prometheus and Grafana provide real-time observability with a pre-provisioned dashboard.
-- k6 workloads and automated scaling benchmarks measure throughput and latency under 1/2/4 worker configurations.
+- k6 workloads and automated scaling benchmarks measure 45→53 req/s throughput with P95 judge latency improving from 2356ms (1 worker) to 1042ms (4 workers).
 
 Not yet implemented:
 

@@ -241,7 +241,7 @@ make load-baseline           # 20 VU, 2m mixed workload
 make load-worker-scale       # 1/2/4 worker comparison, generates report
 ```
 
-示例 benchmark 报告位于 `docs/benchmarks/`，包含机器元数据、1/2/4 worker 对比表和解释性分析。运行 `make load-worker-scale` 将用实测数据覆盖该报告。
+实测基准报告位于 `docs/benchmarks/`，包含机器元数据、1/2/4 worker 对比表和解释性分析。运行 `make load-worker-scale` 重新生成。
 
 ## Verification
 
@@ -300,7 +300,7 @@ docs/screenshots/     desktop and mobile product screenshots
 3. 已完成：Next.js + Monaco 分栏工作台、状态轮询、提交历史、响应式布局和 Playwright E2E。
 4. 已完成：Transactional Outbox、多 worker 直接消费、PostgreSQL 租约、fencing token 和故障接管。
 5. 已完成：20 道精选题库、标准化难度/标签、每题至少 6 个隐藏用例和前端组合筛选。
-6. 已完成：Prometheus 应用指标、Grafana 预配 Dashboard、k6 负载测试和 1/2/4 worker 扩展性基准框架（运行 `make load-worker-scale` 生成实测报告）。
+6. 已完成：Prometheus 应用指标、Grafana 预配 Dashboard、k6 负载测试（1/2/4 worker 对比：45→53 req/s，P95 Judge 延迟下降 56%）。
 
 ## Resume Highlights
 

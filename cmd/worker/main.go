@@ -30,6 +30,10 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
+	// 可被子系统（如 metrics serve 失败）取消的 worker 上下文。
+	workerCtx, cancelWorker := context.WithCancel(ctx)
+	defer cancelWorker()
+
 	st, err := store.NewPostgresStore(ctx, cfg.DatabaseURL)
 	if err != nil {
 		slog.Error("worker store setup failed", "error", err)
@@ -68,13 +72,13 @@ func main() {
 
 	// 在启动判题池之前同步绑定 metrics 端口，避免绑定失败时池已在运行。
 	if cfg.MetricsAddr != "" {
-		if err := metrics.Bind(ctx, cfg.MetricsAddr, promhttp.HandlerFor(registry, promhttp.HandlerOpts{})); err != nil {
+		if err := metrics.Bind(ctx, cfg.MetricsAddr, promhttp.HandlerFor(registry, promhttp.HandlerOpts{}), cancelWorker); err != nil {
 			slog.Error("worker metrics bind failed", "error", err)
 			os.Exit(1)
 		}
 	}
 
-	if err := judgeworker.NewPool(slots, cfg.ShutdownGrace).Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
+	if err := judgeworker.NewPool(slots, cfg.ShutdownGrace).Run(workerCtx); err != nil && !errors.Is(err, context.Canceled) {
 		slog.Error("judge worker stopped", "error", err)
 		os.Exit(1)
 	}

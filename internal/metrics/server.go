@@ -11,7 +11,9 @@ import (
 // Bind listens on addr synchronously and starts serving in a goroutine.
 // It returns any bind error BEFORE the caller proceeds, so a port conflict
 // is detected before the worker pool starts.
-func Bind(ctx context.Context, addr string, handler http.Handler) error {
+// After a successful bind, if server.Serve fails with a non-ErrServerClosed
+// error, the provided cancel function is called to shut down the worker.
+func Bind(ctx context.Context, addr string, handler http.Handler, cancel context.CancelFunc) error {
 	if handler == nil {
 		return fmt.Errorf("metrics handler is nil")
 	}
@@ -27,7 +29,8 @@ func Bind(ctx context.Context, addr string, handler http.Handler) error {
 	go func() {
 		slog.Info("metrics server listening", "addr", addr)
 		if err := server.Serve(listener); err != nil && err != http.ErrServerClosed {
-			slog.Error("metrics serve failed", "error", err)
+			slog.Error("metrics serve failed, cancelling worker context", "error", err)
+			cancel()
 		}
 	}()
 	return nil

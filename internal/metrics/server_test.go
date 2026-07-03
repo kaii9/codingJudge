@@ -50,6 +50,49 @@ func TestServeRespondsAndShutsDown(t *testing.T) {
 	}
 }
 
+func TestBindReturnsErrorOnBadAddress(t *testing.T) {
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	err := Bind(ctx, "not-a-valid-addr", handler, cancel)
+	if err == nil {
+		t.Fatal("expected bind error for bad address")
+	}
+}
+
+func TestBindSucceedsOnFreePort(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	addr := listener.Addr().String()
+	listener.Close()
+
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("metrics"))
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	if err := Bind(ctx, addr, handler, cancel); err != nil {
+		t.Fatalf("bind: %v", err)
+	}
+
+	// Verify the server is serving.
+	time.Sleep(50 * time.Millisecond)
+	resp, err := http.Get("http://" + addr + "/metrics")
+	if err != nil {
+		t.Fatalf("get metrics: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("status = %d", resp.StatusCode)
+	}
+
+	cancel()
+}
+
 func TestServeReturnsErrorOnBindFailure(t *testing.T) {
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
