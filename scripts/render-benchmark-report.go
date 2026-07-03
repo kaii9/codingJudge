@@ -6,14 +6,13 @@ import (
 	"fmt"
 	"math"
 	"os"
-	"sort"
 	"strings"
 )
 
+// k6Summary mirrors the k6 --summary-export JSON format (k6 2.0).
+// Each metric is a flat map of key→float64 (e.g. "rate", "p(95)", "count").
 type k6Summary struct {
-	Metrics map[string]struct {
-		Values map[string]float64 `json:"values"`
-	} `json:"metrics"`
+	Metrics map[string]map[string]float64 `json:"metrics"`
 }
 
 func main() {
@@ -22,7 +21,7 @@ func main() {
 		os.Exit(1)
 	}
 	meta := readMeta(os.Args[1])
-	summaries := make([]k6Summary, 5) // 索引 1/2/4 对应 1/2/4 worker
+	summaries := make([]k6Summary, 5) // indices 1/2/4 correspond to 1/2/4 workers
 	workerMap := []int{1, 2, 4}
 	for i, w := range workerMap {
 		summaries[w] = readSummary(os.Args[2+i])
@@ -37,20 +36,19 @@ func main() {
 	fmt.Println("| Workers | Submission rate | HTTP P95 | Judge P95 | Failure rate | Peak pending |")
 	fmt.Println("| --- | --- | --- | --- | --- | --- |")
 
-	workerCounts := []int{1, 2, 4}
-	for _, w := range workerCounts {
-		s := summaries[w] // w==1,2,4 maps to index 1,2,4
+	for _, w := range workerMap {
+		s := summaries[w]
 		rate := metricValue(s, "http_reqs", "rate")
-		httpP95 := metricPercentile(s, "http_req_duration", 0.95)
+		httpP95 := metricValue(s, "http_req_duration", "p(95)") // k6 reports milliseconds
 		judgeP95 := metricValue(s, "judge_terminal_duration", "p(95)")
-		failRate := metricValue(s, "http_req_failed", "rate")
+		failRate := metricValue(s, "http_req_failed", "value") // k6 reports 0-1
 		peak := strings.TrimSpace(meta[fmt.Sprintf("peak_pending_w%d", w)])
 		if peak == "" {
 			peak = "-"
 		}
 
 		fmt.Printf("| %d | %.2f/s | %.2fms | %.2fms | %.4f%% | %s |\n",
-			w, rate, httpP95*1000, judgeP95, failRate*100, peak)
+			w, rate, httpP95, judgeP95, failRate*100, peak)
 	}
 
 	fmt.Println()
@@ -95,43 +93,14 @@ func readSummary(path string) k6Summary {
 	return s
 }
 
-func metricValue(s k6Summary, name, key string) float64 {
-	m, ok := s.Metrics[name]
+func metricValue(s k6Summary, metricName, key string) float64 {
+	metric, ok := s.Metrics[metricName]
 	if !ok {
 		return math.NaN()
 	}
-	v, ok := m.Values[key]
+	v, ok := metric[key]
 	if !ok {
 		return math.NaN()
 	}
 	return v
-}
-
-func metricPercentile(s k6Summary, name string, p float64) float64 {
-	m, ok := s.Metrics[name]
-	if !ok {
-		return math.NaN()
-	}
-	// k6 summary stores percentiles as "p(95)" etc.
-	key := fmt.Sprintf("p(%.0f)", p*100)
-	v, ok := m.Values[key]
-	if ok {
-		return v
-	}
-	// Fallback: compute from sorted values.
-	var values []float64
-	for k, val := range m.Values {
-		if strings.HasPrefix(k, "p(") {
-			values = append(values, val)
-		}
-	}
-	if len(values) == 0 {
-		return math.NaN()
-	}
-	sort.Float64s(values)
-	idx := int(float64(len(values)-1) * p)
-	if idx >= len(values) {
-		idx = len(values) - 1
-	}
-	return values[idx]
 }

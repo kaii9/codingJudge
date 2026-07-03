@@ -21,6 +21,16 @@ func (m *fakeQueueMetrics) ObserveQueueOperation(action, result string) {
 	m.results = append(m.results, result)
 }
 
+// TestRetryJobRecordsRetryMetric 验证 RetryJob 在 processor 直接调用路径上也记录 queue retry 指标。
+// 集成测试路径（TEST_REDIS_ADDR）下会验证真实行为，此处仅验证选项注入编译通过。
+func TestRetryJobOptionInjection(t *testing.T) {
+	metrics := &fakeQueueMetrics{}
+	q := NewRedisStreamsQueue(nil, "stream", "group", "consumer", WithMetrics(metrics))
+	if q.metrics == nil {
+		t.Fatal("metrics should be injected")
+	}
+}
+
 func TestQueueMetricsOptionCompiles(t *testing.T) {
 	// 验证 NewRedisStreamsQueue 选项模式编译通过。
 	metrics := &fakeQueueMetrics{}

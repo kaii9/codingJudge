@@ -1,8 +1,8 @@
-date: 2026-07-03T12:00:00Z
-git_commit: abc1234
+date: 2026-07-03T07:35:45Z
+git_commit: 03ee3cd
 os: Darwin
 arch: arm64
-logical_cpus: 10
-peak_pending_w1: 15
-peak_pending_w2: 8
-peak_pending_w4: 3
+logical_cpus: 8
+peak_pending_w1: -
+peak_pending_w2: -
+peak_pending_w4: -

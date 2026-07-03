@@ -125,6 +125,27 @@ func TestProcessorRecordsDeadLetterMetric(t *testing.T) {
 	}
 }
 
+func TestProcessorRecordsWrongAnswerNotAccepted(t *testing.T) {
+	// 验证 judge 返回 wrong_answer 时，metrics 记录 wrong_answer 而非 accepted。
+	calls := []string{}
+	st := &fakeStore{claim: acquiredClaim(), problem: domain.Problem{ID: "sum"}, completeOK: true, calls: &calls}
+	q := &fakeQueue{job: domain.Job{SubmissionID: "sub-1", Receipt: "1-0"}, calls: &calls}
+	j := &fakeJudge{result: domain.JudgeResult{Status: domain.StatusWrongAnswer}, calls: &calls}
+	m := &fakeWorkerMetrics{}
+	p := judgeworker.NewProcessor(st, q, j, judgeworker.Config{
+		WorkerID: "worker-a", LeaseDuration: time.Minute, HeartbeatInterval: time.Hour,
+		Token: func() (string, error) { return "token", nil }, Metrics: m,
+	})
+	if err := p.ProcessOne(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if len(m.finishCalls) != 1 || m.finishCalls[0][1] != "wrong_answer" {
+		t.Errorf("finish calls = %v, want result=wrong_answer", m.finishCalls)
+	}
+}
+
 func TestProcessorRecordsTakeoverMetric(t *testing.T) {
 	calls := []string{}
 	claim := acquiredClaim()

@@ -156,14 +156,20 @@ func (q *RedisStreamsQueue) Retry(ctx context.Context, job domain.Job, cause err
 	if deadLettered {
 		return true, q.DeadLetter(ctx, job, attempts, cause)
 	}
-	err := q.RetryJob(ctx, job, attempts, cause)
-	q.record("retry", err)
-	return false, err
+	return false, q.RetryJob(ctx, job, attempts, cause)
 }
 
 func (q *RedisStreamsQueue) RetryJob(ctx context.Context, job domain.Job, attempt int, cause error) error {
-	// 不在此处记录指标，避免 Retry → DeadLetter 路径重复计数。
-	return q.moveAndAck(ctx, q.stream, job, attempt, cause)
+	err := q.moveAndAck(ctx, q.stream, job, attempt, cause)
+	// 记录 retry 指标——覆盖所有 RetryJob 调用路径（包括 processor 直接调用）。
+	if q.metrics != nil {
+		result := "success"
+		if err != nil {
+			result = "error"
+		}
+		q.metrics.ObserveQueueOperation("retry", result)
+	}
+	return err
 }
 
 func (q *RedisStreamsQueue) DeadLetter(ctx context.Context, job domain.Job, attempt int, cause error) error {

@@ -1,8 +1,8 @@
 {
   "metrics": {
-    "http_reqs": {"values": {"rate": 8.5, "count": 510}},
-    "http_req_duration": {"values": {"avg": 0.05, "p(90)": 0.12, "p(95)": 0.15}},
-    "http_req_failed": {"values": {"rate": 0.0, "passes": 510, "fails": 0}},
-    "judge_terminal_duration": {"values": {"avg": 1500, "p(90)": 2500, "p(95)": 3000}}
+    "http_reqs": {"rate": 8.5, "count": 510},
+    "http_req_duration": {"avg": 50.2, "p(90)": 120.3, "p(95)": 150.7},
+    "http_req_failed": {"value": 0.0, "passes": 510, "fails": 0},
+    "judge_terminal_duration": {"avg": 1500.0, "p(90)": 2500.0, "p(95)": 3000.0}
   }
 }

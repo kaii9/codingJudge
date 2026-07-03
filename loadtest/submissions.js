@@ -1,6 +1,6 @@
 import { check } from 'k6';
 import { Trend } from 'k6/metrics';
-import { createSubmission, pollUntilTerminal, listProblems } from './lib/client.js';
+import { createSubmission, pollUntilTerminal, findSumProblem } from './lib/client.js';
 import { byLanguage } from './lib/programs.js';
 
 const judgeTerminalDuration = new Trend('judge_terminal_duration');
@@ -22,14 +22,13 @@ export const options = {
 };
 
 export default function () {
-  const list = listProblems();
-  const problems = list.json();
-  if (!Array.isArray(problems) || problems.length === 0) return;
+  const problem = findSumProblem();
+  if (!problem) return;
 
   const lang = Math.random() < 0.5 ? 'go' : 'python';
   const code = byLanguage(lang);
 
-  const sub = createSubmission(problems[0].id, lang, code);
+  const sub = createSubmission(problem.id, lang, code);
   if (!sub || !sub.id) return;
 
   const result = pollUntilTerminal(sub.id);

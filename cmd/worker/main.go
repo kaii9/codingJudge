@@ -66,13 +66,12 @@ func main() {
 
 	slog.Info("judge worker started", "worker_id", cfg.WorkerID, "concurrency", cfg.Concurrency)
 
+	// 在启动判题池之前同步绑定 metrics 端口，避免绑定失败时池已在运行。
 	if cfg.MetricsAddr != "" {
-		go func() {
-			if err := metrics.Serve(ctx, cfg.MetricsAddr, promhttp.HandlerFor(registry, promhttp.HandlerOpts{})); err != nil {
-				slog.Error("worker metrics server failed", "error", err)
-				os.Exit(1)
-			}
-		}()
+		if err := metrics.Bind(ctx, cfg.MetricsAddr, promhttp.HandlerFor(registry, promhttp.HandlerOpts{})); err != nil {
+			slog.Error("worker metrics bind failed", "error", err)
+			os.Exit(1)
+		}
 	}
 
 	if err := judgeworker.NewPool(slots, cfg.ShutdownGrace).Run(ctx); err != nil && !errors.Is(err, context.Canceled) {

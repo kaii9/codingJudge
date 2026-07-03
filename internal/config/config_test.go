@@ -103,6 +103,18 @@ func TestWorkerMetricsAddrDefaultsAndOverrides(t *testing.T) {
 	}
 }
 
+func TestLoadWorkerRejectsMalformedMetricsAddr(t *testing.T) {
+	t.Parallel()
+	values := map[string]string{
+		"DATABASE_URL":        "postgres://db",
+		"REDIS_ADDR":          "redis:6379",
+		"WORKER_METRICS_ADDR": "not-a-valid-addr",
+	}
+	if _, err := config.LoadWorker(func(key string) string { return values[key] }); err == nil {
+		t.Fatal("LoadWorker should reject malformed WORKER_METRICS_ADDR")
+	}
+}
+
 func TestValidateAPIRejectsPartialDurableConfiguration(t *testing.T) {
 	t.Parallel()
 	cfg := config.Load(func(key string) string {

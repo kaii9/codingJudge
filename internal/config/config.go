@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"net"
 	"os"
 	"strconv"
 	"time"
@@ -122,6 +123,9 @@ func LoadWorker(getenv func(string) string) (WorkerConfig, error) {
 	if cfg.MetricsAddr == "off" {
 		cfg.MetricsAddr = ""
 	}
+	if cfg.MetricsAddr != "" && !isValidAddr(cfg.MetricsAddr) {
+		return WorkerConfig{}, fmt.Errorf("WORKER_METRICS_ADDR %q is not a valid listen address", cfg.MetricsAddr)
+	}
 	return cfg, nil
 }
 
@@ -145,4 +149,10 @@ func parsePositiveDuration(value string, fallback time.Duration) (time.Duration,
 		return 0, fmt.Errorf("must be a positive duration")
 	}
 	return parsed, nil
+}
+
+func isValidAddr(addr string) bool {
+	// Must be a valid listen address for net.Listen: ":port" or "host:port".
+	_, _, err := net.SplitHostPort(addr)
+	return err == nil
 }

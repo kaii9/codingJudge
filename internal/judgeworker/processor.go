@@ -131,10 +131,10 @@ func (p *Processor) ProcessJob(ctx context.Context, job domain.Job) error {
 				p.metrics.WorkerLeaseTakeover()
 			}
 		}
-		err := p.processClaim(ctx, job, claim)
+		judgeResult, err := p.processClaim(ctx, job, claim)
 		if p.metrics != nil {
 			language := string(claim.Submission.Language)
-			result := metricResult(claim.Submission, err)
+			result := metricResult(judgeResult, err)
 			p.metrics.WorkerJobFinished(language, result, p.config.Now().Sub(started))
 		}
 		return err
@@ -143,41 +143,41 @@ func (p *Processor) ProcessJob(ctx context.Context, job domain.Job) error {
 	}
 }
 
-func (p *Processor) processClaim(ctx context.Context, job domain.Job, claim domain.SubmissionClaim) error {
+func (p *Processor) processClaim(ctx context.Context, job domain.Job, claim domain.SubmissionClaim) (domain.JudgeResult, error) {
 	problem, ok, err := p.store.GetProblem(ctx, claim.Submission.ProblemID)
 	if err != nil {
-		return p.handleInfrastructureError(ctx, job, claim, fmt.Errorf("get problem: %w", err))
+		return domain.JudgeResult{}, p.handleInfrastructureError(ctx, job, claim, fmt.Errorf("get problem: %w", err))
 	}
 	if !ok {
 		result := domain.JudgeResult{Status: domain.StatusInternalError, Stderr: "problem not found"}
 		completed, err := p.store.CompleteSubmission(ctx, claim.Submission.ID, claim.Token, p.config.Now(), result)
 		if err != nil {
-			return err
+			return domain.JudgeResult{}, err
 		}
 		if !completed {
-			return ErrLeaseLost
+			return domain.JudgeResult{}, ErrLeaseLost
 		}
-		return p.queue.Ack(ctx, job)
+		return result, p.queue.Ack(ctx, job)
 	}
 
 	result, err := p.evaluateWithHeartbeat(ctx, job, claim, problem)
 	if err != nil {
 		if errors.Is(err, ErrLeaseLost) {
-			return err
+			return domain.JudgeResult{}, err
 		}
-		return p.handleInfrastructureError(ctx, job, claim, err)
+		return domain.JudgeResult{}, p.handleInfrastructureError(ctx, job, claim, err)
 	}
 	completed, err := p.store.CompleteSubmission(ctx, claim.Submission.ID, claim.Token, p.config.Now(), result)
 	if err != nil {
-		return fmt.Errorf("complete submission: %w", err)
+		return domain.JudgeResult{}, fmt.Errorf("complete submission: %w", err)
 	}
 	if !completed {
-		return ErrLeaseLost
+		return domain.JudgeResult{}, ErrLeaseLost
 	}
 	if err := p.queue.Ack(ctx, job); err != nil {
-		return fmt.Errorf("acknowledge completed submission: %w", err)
+		return domain.JudgeResult{}, fmt.Errorf("acknowledge completed submission: %w", err)
 	}
-	return nil
+	return result, nil
 }
 
 func (p *Processor) evaluateWithHeartbeat(ctx context.Context, job domain.Job, claim domain.SubmissionClaim, problem domain.Problem) (domain.JudgeResult, error) {
@@ -263,18 +263,18 @@ func (p *Processor) handleInfrastructureError(ctx context.Context, job domain.Jo
 }
 
 // metricResult 将 JudgeResult 状态映射为 worker metrics 的 result 标签值。
-func metricResult(sub domain.Submission, processErr error) string {
+func metricResult(result domain.JudgeResult, processErr error) string {
 	if processErr != nil {
 		if errors.Is(processErr, ErrLeaseLost) {
 			return "lease_lost"
 		}
 		return "infrastructure_error"
 	}
-	if sub.Result == nil {
+	if result.Status == "" {
 		return "accepted"
 	}
-	switch sub.Result.Status {
-	case domain.StatusAccepted:
+	switch result.Status {
+	case domain.StatusAccepted, "":
 		return "accepted"
 	case domain.StatusWrongAnswer:
 		return "wrong_answer"
