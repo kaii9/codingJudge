@@ -54,3 +54,22 @@ migrate-hot20:
 
 fault-test:
 	bash scripts/fault-test.sh
+
+.PHONY: observability-config observability-up load-smoke load-baseline load-worker-scale
+
+observability-config:
+	docker compose config --quiet
+	@docker run --rm -v $(CURDIR)/deploy/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro prom/prometheus:v3.13.0 promtool check config /etc/prometheus/prometheus.yml
+	@docker run --rm -v $(CURDIR)/deploy/prometheus/prometheus.rules.yml:/etc/prometheus/prometheus.rules.yml:ro prom/prometheus:v3.13.0 promtool check rules /etc/prometheus/prometheus.rules.yml
+
+observability-up:
+	docker compose up -d --build --scale worker=2
+
+load-smoke:
+	@docker compose --profile loadtest run --rm k6 run /scripts/problems.js --env K6_VUS=1 --env K6_DURATION=30s --summary-export=/results/smoke-problems-$$(date +%s).json 2>&1 || true
+
+load-baseline:
+	@docker compose --profile loadtest run --rm k6 run /scripts/mixed.js --env K6_VUS=20 --env K6_DURATION=2m --summary-export=/results/baseline-$$(date +%s).json 2>&1 || true
+
+load-worker-scale:
+	bash scripts/run-worker-scale-benchmark.sh

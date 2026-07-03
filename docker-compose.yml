@@ -56,6 +56,7 @@ services:
       JUDGE_MAX_ATTEMPTS: "3"
       WORKER_SHUTDOWN_GRACE: "30s"
       JUDGE_WORKDIR: "/tmp/codingjudge-sandbox"
+      WORKER_METRICS_ADDR: ":9091"
     depends_on:
       postgres:
         condition: service_healthy
@@ -70,6 +71,25 @@ services:
       - no-new-privileges:true
     cap_drop:
       - ALL
+
+  prometheus:
+    image: prom/prometheus:v3.13.0
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--web.console.templates=/usr/share/prometheus/consoles"
+      - "--web.console.libraries=/usr/share/prometheus/console_libraries"
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./deploy/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./deploy/prometheus/prometheus.rules.yml:/etc/prometheus/prometheus.rules.yml:ro
+      - prometheus-data:/prometheus
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:9090/-/healthy"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
 
   postgres:
     image: postgres:16-alpine
@@ -113,3 +133,4 @@ services:
 volumes:
   postgres-data:
   minio-data:
+  prometheus-data:
