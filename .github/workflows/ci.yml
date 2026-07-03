@@ -39,7 +39,9 @@ jobs:
         with:
           go-version: "1.25"
       - run: go test ./...
+      - run: go test -race ./internal/judge ./internal/judgeworker ./internal/store
       - run: go test -tags=integration ./internal/store ./internal/queue
+      - run: go vet ./...
 
   frontend:
     runs-on: ubuntu-latest
@@ -60,3 +62,20 @@ jobs:
       - run: npm run typecheck
       - run: npm run test:run
       - run: npm run build
+
+  observability:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: check prometheus config
+        run: |
+          docker run --rm --entrypoint /bin/promtool \
+            -v $PWD/deploy/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro \
+            -v $PWD/deploy/prometheus/prometheus.rules.yml:/etc/prometheus/prometheus.rules.yml:ro \
+            prom/prometheus:v3.13.0 check config /etc/prometheus/prometheus.yml
+      - name: check compose with loadtest profile
+        run: |
+          echo 'services: { api: { build: ".", command: ["true"] }, postgres: { image: "postgres:16-alpine" }, redis: { image: "redis:7-alpine" } }' > docker-compose.ci.yml
+          docker compose -f docker-compose.ci.yml -f docker-compose.yml --profile loadtest config --quiet

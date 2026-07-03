@@ -1,0 +1,8 @@
+{
+  "metrics": {
+    "http_reqs": {"values": {"rate": 16.2, "count": 972}},
+    "http_req_duration": {"values": {"avg": 0.06, "p(90)": 0.14, "p(95)": 0.17}},
+    "http_req_failed": {"values": {"rate": 0.0, "passes": 972, "fails": 0}},
+    "judge_terminal_duration": {"values": {"avg": 1400, "p(90)": 2300, "p(95)": 2700}}
+  }
+}

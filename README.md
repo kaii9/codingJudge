@@ -67,6 +67,8 @@ Compose 暴露的开发端口：
 - Redis: `16379`
 - MinIO API: `19000`
 - MinIO Console: `19001`
+- Prometheus: `9090`
+- Grafana: `3001`
 
 环境变量示例见 [.env.example](.env.example)。
 
@@ -212,6 +214,35 @@ docker compose exec redis redis-cli XREVRANGE judge:submissions:dead + - COUNT 1
 docker compose exec redis redis-cli XPENDING judge:submissions judge-workers
 ```
 
+## Observability
+
+API 和每个 worker 都在独立端口暴露 Prometheus 指标（API: `:8080/metrics`，worker: `:9091/metrics`），所有 custom metric 使用 `codingjudge_` 前缀。Prometheus 静态发现 API 并通过 DNS 自动发现 worker。
+
+启动含监控的 Compose 栈：
+
+```bash
+make observability-up
+```
+
+Grafana 预配 Dashboard（UID `gojudge-overview`）包含 API、Queue/Outbox、Worker、Judge 四个行，内置 HTTP 吞吐/延迟/错误、队列深度、worker 并发度和判题用例耗时面板。默认凭据 admin/admin。
+
+验证配置：
+
+```bash
+make observability-config
+bash scripts/verify-grafana.sh
+```
+
+自动 scaling benchmark：
+
+```bash
+make load-smoke              # 1 VU, 30s smoke test
+make load-baseline           # 20 VU, 2m mixed workload
+make load-worker-scale       # 1/2/4 worker comparison, generates report
+```
+
+生成的 benchmark 报告位于 `docs/benchmarks/`，包含机器元数据、1/2/4 worker 对比表和解释性分析。
+
 ## Verification
 
 后端单元测试、竞态检查和静态分析：
@@ -269,7 +300,7 @@ docs/screenshots/     desktop and mobile product screenshots
 3. 已完成：Next.js + Monaco 分栏工作台、状态轮询、提交历史、响应式布局和 Playwright E2E。
 4. 已完成：Transactional Outbox、多 worker 直接消费、PostgreSQL 租约、fencing token 和故障接管。
 5. 已完成：20 道精选题库、标准化难度/标签、每题至少 6 个隐藏用例和前端组合筛选。
-6. 下一阶段：Prometheus、压力测试、登录、比赛、排行榜、管理后台和 MinIO 测试用例集成。
+6. 已完成：Prometheus 应用指标、Grafana 预配 Dashboard、k6 负载测试和 1/2/4 worker 扩展性报告。
 
 ## Resume Highlights
 

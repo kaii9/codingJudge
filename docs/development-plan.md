@@ -169,7 +169,32 @@ Acceptance:
 - Existing database volumes can apply `make migrate-hot20` repeatedly without duplicates.
 - The frontend can combine collection, search and difficulty filters without horizontal overflow.
 
-## Phase 8: Product Extensions
+## Phase 8: Observability and Load Testing
+
+Status: implemented.
+
+Goal: add application-level Prometheus metrics, a provisioned Grafana dashboard, and reproducible k6 benchmarks comparing one, two, and four judge workers.
+
+Tasks:
+
+- Add 16 codingjudge_-prefixed application metrics with bounded labels.
+- Instrument HTTP, submission creation, outbox, Redis queue, worker lifecycle and judge cases.
+- Serve worker metrics on port 9091 and sample Redis Pending gauge from the API.
+- Add Prometheus Compose service with DNS-based worker discovery and recording rules.
+- Provision a Grafana dashboard with API, Queue/Outbox, Worker and Judge rows.
+- Create k6 workloads (smoke, baseline, submissions, mixed) with safe cleanup.
+- Automate 1/2/4 worker scaling benchmark and publish structured reports.
+
+Acceptance:
+
+- API and every scaled worker expose Prometheus metrics without high-cardinality labels.
+- Prometheus discovers worker targets without configuration edits.
+- Grafana starts with a usable dashboard requiring no manual setup.
+- API and judging remain functional while Prometheus and Grafana are stopped.
+- k6 smoke and baseline thresholds pass.
+- A reproducible 1/2/4 worker report contains machine metadata and measured values.
+
+## Phase 9: Product Extensions
 
 Goal: turn MVP into a richer judge platform.
 
@@ -180,7 +205,6 @@ Tasks:
 - Contest model.
 - Leaderboard.
 - MinIO test case storage.
-- Prometheus metrics.
 
 Acceptance:
 
@@ -188,7 +212,7 @@ Acceptance:
 
 ## Current Development Slice
 
-The backend MVP, browser demo, reliable multi-worker phase and curated problem library are complete. The next recommended slice is observability and measured load testing before product extensions.
+The backend MVP, browser demo, reliable multi-worker phase, curated problem library, and observability/load testing are complete. The next recommended slice is authentication and product extensions.
 
 Reason:
 
@@ -201,10 +225,11 @@ Reason:
 - The catalog contains 20 curated interview problems plus 2 Starter problems with normalized metadata and hidden cases.
 - Collection, title/tag and difficulty filters keep the larger catalog navigable.
 - Playwright verifies browser submissions and responsive desktop/mobile layouts.
+- Prometheus and Grafana provide real-time observability with a pre-provisioned dashboard.
+- k6 workloads and automated scaling benchmarks measure throughput and latency under 1/2/4 worker configurations.
 
 Not yet implemented:
 
 - Authentication and user accounts.
 - Contests, leaderboards and administration.
 - MinIO-backed test-case storage.
-- Prometheus metrics and dashboards.
