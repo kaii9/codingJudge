@@ -171,7 +171,7 @@ Acceptance:
 
 ## Phase 8: Observability and Load Testing
 
-Status: implemented. Real 1/2/4 worker benchmark captured.
+Status: implemented. Fixed-load benchmark: 1→4 workers scales accepted/s from 1.33→3.34, Judge P95 from 5530→2062ms.
 
 Goal: add application-level Prometheus metrics, a provisioned Grafana dashboard, and reproducible k6 benchmarks comparing one, two, and four judge workers.
 

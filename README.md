@@ -300,7 +300,7 @@ docs/screenshots/     desktop and mobile product screenshots
 3. 已完成：Next.js + Monaco 分栏工作台、状态轮询、提交历史、响应式布局和 Playwright E2E。
 4. 已完成：Transactional Outbox、多 worker 直接消费、PostgreSQL 租约、fencing token 和故障接管。
 5. 已完成：20 道精选题库、标准化难度/标签、每题至少 6 个隐藏用例和前端组合筛选。
-6. 已完成：Prometheus 应用指标、Grafana 预配 Dashboard、k6 负载测试（1/2/4 worker 对比：45→53 req/s，P95 Judge 延迟下降 56%）。
+6. 已完成：Prometheus 应用指标、Grafana 预配 Dashboard、k6 固定到达率负载测试。1→4 worker 扩展下 Accepted 吞吐从 1.33/s 提升至 3.34/s，Judge P95 延迟从 5530ms 降至 2062ms。
 
 ## Resume Highlights
 

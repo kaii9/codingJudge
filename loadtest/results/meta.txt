@@ -1,8 +1,0 @@
-date: 2026-07-03T10:25:03Z
-git_commit: d19fb70
-os: Darwin
-arch: arm64
-logical_cpus: 8
-peak_pending_w1: 1
-peak_pending_w2: 2
-peak_pending_w4: 4

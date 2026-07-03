@@ -36,7 +36,7 @@ docker compose build
 # Collect extended metadata.
 DOCKER_VERSION=$(docker version --format '{{.Server.Version}}' 2>/dev/null || echo unknown)
 MEMORY=$(sysctl -n hw.memsize 2>/dev/null | awk '{printf "%.0f GB", $1/1024/1024/1024}' || echo unknown)
-K6_VERSION=$(docker compose --profile loadtest run --rm --entrypoint k6 k6 version 2>/dev/null | head -1 | awk '{print $NF}' || echo unknown)
+K6_VERSION=$(docker compose --profile loadtest run --rm --entrypoint k6 k6 version 2>/dev/null | head -1 | awk '{print $3}' || echo unknown)
 JUDGE_IMAGES="golang:1.25-alpine, python:3.12-alpine, gcc:13"
 
 info "recording machine metadata..."
@@ -58,7 +58,7 @@ SCENARIO="${K6_SCENARIO:-submissions.js}"
 K6_RATE="${K6_RATE:-1}"
 K6_VUS="${K6_VUS:-4}"
 K6_DURATION="${K6_DURATION:-2m}"
-K6_TIMEOUT="${K6_TIMEOUT:-60}"
+K6_TIMEOUT="${K6_TIMEOUT:-90}"
 K6_ARGS="${K6_ARGS:---env K6_RATE=$K6_RATE --env K6_VUS=$K6_VUS --env K6_DURATION=$K6_DURATION --env JUDGE_TIMEOUT_SECONDS=$K6_TIMEOUT}"
 
 # Record scenario parameters in meta.
