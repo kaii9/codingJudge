@@ -67,10 +67,10 @@ observability-up:
 	docker compose up -d --build --scale worker=2
 
 load-smoke:
-	docker compose --profile loadtest run --rm k6 k6 run /scripts/problems.js --env K6_VUS=1 --env K6_DURATION=30s --summary-export=/results/smoke-problems-$$(date +%s).json
+	docker compose --profile loadtest run --rm k6 k6 run /scripts/problems.js --env CJ_VUS=1 --env CJ_DURATION=30s --summary-export=/results/smoke-problems-$$(date +%s).json
 
 load-baseline:
-	docker compose --profile loadtest run --rm k6 k6 run /scripts/mixed.js --env K6_VUS=20 --env K6_DURATION=2m --summary-export=/results/baseline-$$(date +%s).json
+	docker compose --profile loadtest run --rm k6 k6 run /scripts/mixed.js --env CJ_VUS=20 --env CJ_DURATION=2m --env CJ_JUDGE_TIMEOUT_SECONDS=60 --summary-export=/results/baseline-$$(date +%s).json
 
 load-worker-scale:
 	bash scripts/run-worker-scale-benchmark.sh

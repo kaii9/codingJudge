@@ -26,16 +26,19 @@ func main() {
 	}
 
 	type row struct {
-		offeredRate      float64
-		submissionsRate  float64
-		acceptedRate     float64
-		httpRate         float64
-		httpP95          float64
-		judgeP95         float64
-		failRate         float64
-		peak             string
+		offeredRate     float64
+		submissionsRate float64
+		acceptedRate    float64
+		httpRate        float64
+		httpP95         float64
+		judgeP95        float64
+		failRate        float64
+		peak            string
 	}
+
 	rows := make(map[int]row)
+	offeredRate := parseFloat(meta["offered_rate"])
+	durationSecs := parseDuration(meta["duration"])
 
 	for _, w := range workerMap {
 		s := summaries[w]
@@ -49,8 +52,30 @@ func main() {
 			return v
 		}
 
-		// offered rate is a fixed parameter, not a measured metric.
-		offeredRate := parseFloat(meta["offered_rate"])
+		// Validate: dropped_iterations must be 0 (if present in JSON).
+		if dropped, err := extractFloat(s, "dropped_iterations", "count"); err == nil && dropped != 0 {
+			errs = append(errs, fmt.Sprintf("dropped_iterations = %.0f, must be 0", dropped))
+		}
+
+		// Validate: submissions_created.count == iterations.count.
+		createdCount := mustFloat("submissions_created", "count")
+		iterCount := mustFloat("iterations", "count")
+		if math.Abs(createdCount-iterCount) > 0.5 {
+			errs = append(errs, fmt.Sprintf("submissions_created.count=%.0f != iterations.count=%.0f", createdCount, iterCount))
+		}
+
+		// Validate: accepted >= 95% of created.
+		acceptedCount := mustFloat("submissions_accepted", "count")
+		if acceptedCount < createdCount*0.95 {
+			errs = append(errs, fmt.Sprintf("accepted=%.0f < 95%% of created=%.0f", acceptedCount, createdCount))
+		}
+
+		// Validate: created roughly matches offered rate × duration.
+		expected := offeredRate * durationSecs
+		if createdCount < expected*0.5 || createdCount > expected*1.5 {
+			errs = append(errs, fmt.Sprintf("created=%.0f outside expected range [%.0f, %.0f] for %.0f req/s × %.0fs",
+				createdCount, expected*0.5, expected*1.5, offeredRate, durationSecs))
+		}
 
 		submissionsRate := mustFloat("submissions_created", "rate")
 		acceptedRate := mustFloat("submissions_accepted", "rate")
@@ -60,7 +85,7 @@ func main() {
 		failRate := mustFloat("http_req_failed", "value")
 
 		if len(errs) > 0 {
-			fmt.Fprintf(os.Stderr, "worker %d: missing required metrics:\n", w)
+			fmt.Fprintf(os.Stderr, "worker %d: validation failed:\n", w)
 			for _, e := range errs {
 				fmt.Fprintf(os.Stderr, "  - %s\n", e)
 			}
@@ -87,6 +112,16 @@ func main() {
 				os.Exit(1)
 			}
 		}
+	}
+
+	// Validate same offered rate across rounds.
+	var rates []float64
+	for _, w := range workerMap {
+		rates = append(rates, rows[w].offeredRate)
+	}
+	if rates[0] != rates[1] || rates[1] != rates[2] {
+		fmt.Fprintf(os.Stderr, "offered rates differ across rounds: %.2f / %.2f / %.2f\n", rates[0], rates[1], rates[2])
+		os.Exit(1)
 	}
 
 	fmt.Println("# Fixed-Load Worker Scaling Benchmark")
@@ -117,11 +152,13 @@ func main() {
 	fmt.Println()
 	fmt.Printf("- **Offered rate:** %s\n", meta["offered_rate"])
 	fmt.Printf("- **Duration:** %s\n", meta["duration"])
-	fmt.Printf("- **Worker concurrency:** %s slot(s)/worker\n", meta["worker_concurrency"])
+	fmt.Printf("- **Executor:** constant-arrival-rate\n")
+	fmt.Printf("- **Pre-allocated VUs:** %s\n", meta["preallocated_vus"])
+	fmt.Printf("- **Max VUs:** %s\n", meta["max_vus"])
 	fmt.Println()
 	fmt.Println("## Results")
 	fmt.Println()
-	fmt.Println("| Workers | Offered rate | Created/s | Accepted/s | HTTP rate | HTTP P95 | Judge P95 | Failure rate | Peak pending |")
+	fmt.Println("| Workers | Offered rate | Created/s | Accepted/s | HTTP rate | HTTP P95 | Judge P95 | Failure rate | Peak pending (sampled) |")
 	fmt.Println("| --- | --- | --- | --- | --- | --- | --- | --- | --- |")
 
 	for _, w := range workerMap {
@@ -136,11 +173,14 @@ func main() {
 	fmt.Println()
 	fmt.Println("_This is a fixed-load benchmark, not a maximum-throughput test._")
 	fmt.Println("_Results are from a local Docker Compose environment and are not production capacity guarantees._")
+	fmt.Println("_Workers use Docker socket passthrough (Docker-outside-of-Docker), not nested Docker-in-Docker._")
 	fmt.Println()
-	fmt.Println("- The same offered load was applied to 1, 2 and 4 worker configurations.")
-	fmt.Println("- Increasing workers lowers Judge P95 by distributing Docker sandbox execution across more slots.")
-	fmt.Println("- HTTP P95 remains low and stable because the API serves reads and enqueues submissions without blocking on judge execution.")
-	fmt.Println("- Zero peak pending after each run confirms the queue drains reliably under the tested load.")
+	fmt.Println("- The same offered load was applied to 1, 2, and 4 worker configurations using a constant-arrival-rate executor.")
+	fmt.Println("- This benchmark compares Judge P95, HTTP P95, failure rate, and peak sampled pending under identical load.")
+	fmt.Println("- It does NOT measure maximum throughput or claim linear scalability.")
+	fmt.Println("- Peak Pending values are sampled every 5 seconds during the run and represent the highest observed value.")
+	fmt.Println("- Pending returns to 0 after each round, confirming the queue drains under the tested load.")
+	fmt.Println("- This benchmark uses Python submissions only; Go and C++ require Linux native Docker for reliable compilation timing.")
 }
 
 func extractFloat(s k6Summary, metricName, key string) (float64, error) {
@@ -167,7 +207,6 @@ func extractFloat(s k6Summary, metricName, key string) (float64, error) {
 	return f, nil
 }
 
-// parseFloat extracts a float from a string like "1 req/s" or "1.5".
 func parseFloat(s string) float64 {
 	f := strings.Fields(s)
 	if len(f) > 0 {
@@ -177,6 +216,26 @@ func parseFloat(s string) float64 {
 		}
 	}
 	return 0
+}
+
+func parseDuration(s string) float64 {
+	// Parse "2m" → 120, "30s" → 30.
+	f := strings.Fields(s)
+	if len(f) == 0 {
+		return 0
+	}
+	raw := f[0]
+	var num float64
+	var unit string
+	fmt.Sscanf(raw, "%f%s", &num, &unit)
+	switch unit {
+	case "m":
+		return num * 60
+	case "h":
+		return num * 3600
+	default:
+		return num
+	}
 }
 
 func readMeta(path string) map[string]string {

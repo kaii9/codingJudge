@@ -2,8 +2,8 @@ import { check } from 'k6';
 import { listProblems, getProblem } from './lib/client.js';
 
 export const options = {
-  vus: parseInt(__ENV.K6_VUS) || 1,
-  duration: __ENV.K6_DURATION || '30s',
+  vus: parseInt(__ENV.CJ_VUS) || 1,
+  duration: __ENV.CJ_DURATION || '30s',
   thresholds: {
     http_req_failed: ['rate<0.01'],
     http_req_duration: ['p(95)<300'],

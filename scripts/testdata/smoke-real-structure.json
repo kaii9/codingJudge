@@ -44,9 +44,16 @@
     },
     "submissions_accepted": {
       "rate": 0.75,
-      "count": 112,
+      "count": 120,
       "type": "counter",
       "contains": "default"
+    },
+    "iterations": {
+      "count": 120,
+      "rate": 1.0
+    },
+    "dropped_iterations": {
+      "count": 0
     }
   }
 }

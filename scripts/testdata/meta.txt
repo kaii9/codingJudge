@@ -1,5 +1,5 @@
 date: 2026-07-03T12:00:00Z
-git_commit: abc1234
+git_commit: test1234
 os: Darwin
 arch: arm64
 logical_cpus: 8
@@ -9,6 +9,10 @@ k6_version: 2.0.0
 judge_images: golang:1.25-alpine, python:3.12-alpine, gcc:13
 offered_rate: 1 req/s
 duration: 2m
+preallocated_vus: 4
+max_vus: 8
+scenario: submissions.js
+judge_timeout_seconds: 90
 worker_concurrency: 1
 peak_pending_w1: 1
 peak_pending_w2: 2

@@ -3,7 +3,7 @@ import { check, sleep } from 'k6';
 import { Counter, Rate } from 'k6/metrics';
 
 export const BASE_URL = __ENV.BASE_URL || 'http://api:8080';
-export const JUDGE_TIMEOUT = parseInt(__ENV.JUDGE_TIMEOUT_SECONDS) || 30;
+export const JUDGE_TIMEOUT = parseInt(__ENV.CJ_JUDGE_TIMEOUT_SECONDS) || 30;
 
 export const logicalFailure = new Rate('logical_failures');
 // 自定义指标：区分 HTTP 请求量与业务提交量。

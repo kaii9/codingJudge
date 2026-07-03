@@ -3,8 +3,8 @@ import { createSubmission, pollUntilTerminal, findSumProblem } from './lib/clien
 import { byLanguage } from './lib/programs.js';
 
 const judgeTerminalDuration = new Trend('judge_terminal_duration');
-// 基准测试使用 Python，规避 macOS Docker Desktop 的 Docker-in-Docker 编译资源竞争。
-// Go/C++ 编译在 Linux 原生 Docker 环境下正常运行，但在 macOS Docker-in-Docker
+// 基准测试使用 Python，规避 macOS Docker-outside-of-Docker 编译资源竞争。
+// Go/C++ 编译在 Linux 原生 Docker 环境下正常运行，但在 macOS Docker socket passthrough
 // 中多 Worker 并发编译时编译耗时可能超过判题租约。这是已知环境限制。
 const languages = ['python'];
 
@@ -12,10 +12,11 @@ export const options = {
   scenarios: {
     constant_load: {
       executor: 'constant-arrival-rate',
-      rate: parseInt(__ENV.K6_RATE) || 5,
+      rate: parseInt(__ENV.CJ_RATE) || 5,
       timeUnit: '1s',
-      duration: __ENV.K6_DURATION || '30s',
-      preAllocatedVUs: parseInt(__ENV.K6_VUS) || 10,
+      duration: __ENV.CJ_DURATION || '30s',
+      preAllocatedVUs: parseInt(__ENV.CJ_PREALLOCATED_VUS) || 10,
+      maxVUs: parseInt(__ENV.CJ_MAX_VUS) || 30,
     },
   },
   thresholds: {
@@ -35,7 +36,7 @@ export default function () {
   const sub = createSubmission(problem.id, language, code);
   if (!sub || !sub.id) return;
 
-  const result = pollUntilTerminal(sub.id);
+  const result = pollUntilTerminal(sub.id, parseInt(__ENV.CJ_JUDGE_TIMEOUT_SECONDS) || 30);
   if (result) {
     judgeTerminalDuration.add(result.elapsed);
   }

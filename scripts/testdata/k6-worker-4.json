@@ -1,7 +1,9 @@
 {
   "metrics": {
-    "submissions_created": {"rate": 0.95, "count": 114, "type": "counter", "contains": "default"},
-    "submissions_accepted": {"rate": 0.92, "count": 110, "type": "counter", "contains": "default"},
+    "iterations": {"count": 120, "rate": 1.0},
+    "dropped_iterations": {"count": 0},
+    "submissions_created": {"rate": 1.0, "count": 120},
+    "submissions_accepted": {"rate": 1.0, "count": 120},
     "http_reqs": {"rate": 52.98, "count": 6358},
     "http_req_duration": {"avg": 2.5, "p(90)": 5.0, "p(95)": 6.35, "thresholds": {"p(95)<300": false}},
     "http_req_failed": {"value": 0.0, "passes": 6358, "fails": 0, "thresholds": {"rate<0.01": false}},

@@ -15,7 +15,6 @@ info()  { echo -e "${GREEN}[info]${NC} $*"; }
 die()   { echo -e "${RED}[fatal]${NC} $*"; exit 1; }
 warn()  { echo -e "${RED}[warn]${NC} $*"; }
 
-# Restore to 2 workers on exit, preserving the original exit code.
 cleanup() {
   local code=$?
   info "restoring 2 workers..."
@@ -33,10 +32,9 @@ mkdir -p "$(dirname "$REPORT")"
 info "building images..."
 docker compose build
 
-# Collect extended metadata.
 DOCKER_VERSION=$(docker version --format '{{.Server.Version}}' 2>/dev/null || echo unknown)
 MEMORY=$(sysctl -n hw.memsize 2>/dev/null | awk '{printf "%.0f GB", $1/1024/1024/1024}' || echo unknown)
-K6_VERSION=$(docker compose --profile loadtest run --rm --entrypoint k6 k6 version 2>/dev/null | head -1 | awk '{print $3}' || echo unknown)
+K6_VERSION=$(docker compose --profile loadtest run --rm --entrypoint k6 k6 version 2>/dev/null | head -1 | sed 's/.*k6 v//' | awk '{print $1}' || echo unknown)
 JUDGE_IMAGES="golang:1.25-alpine, python:3.12-alpine, gcc:13"
 
 info "recording machine metadata..."
@@ -52,24 +50,61 @@ info "recording machine metadata..."
   echo "judge_images: ${JUDGE_IMAGES}"
 } > "$RESULTS/meta.txt"
 
-REQUIRED_METRICS="http_reqs http_req_duration http_req_failed"
+REQUIRED_METRICS="http_reqs http_req_duration http_req_failed submissions_created submissions_accepted iterations"
 
 SCENARIO="${K6_SCENARIO:-submissions.js}"
-K6_RATE="${K6_RATE:-1}"
-K6_VUS="${K6_VUS:-4}"
-K6_DURATION="${K6_DURATION:-2m}"
-K6_TIMEOUT="${K6_TIMEOUT:-90}"
-K6_ARGS="${K6_ARGS:---env K6_RATE=$K6_RATE --env K6_VUS=$K6_VUS --env K6_DURATION=$K6_DURATION --env JUDGE_TIMEOUT_SECONDS=$K6_TIMEOUT}"
+CJ_RATE="${CJ_RATE:-1}"
+CJ_PREALLOCATED_VUS="${CJ_PREALLOCATED_VUS:-20}"
+CJ_MAX_VUS="${CJ_MAX_VUS:-30}"
+CJ_DURATION="${CJ_DURATION:-2m}"
+CJ_TIMEOUT="${CJ_TIMEOUT:-120}"
 
-# Record scenario parameters in meta.
+# Use non-reserved k6 env var names so the constant-arrival-rate scenario is not overridden.
+K6_ARGS="--env CJ_RATE=$CJ_RATE --env CJ_PREALLOCATED_VUS=$CJ_PREALLOCATED_VUS --env CJ_MAX_VUS=$CJ_MAX_VUS --env CJ_DURATION=$CJ_DURATION --env CJ_JUDGE_TIMEOUT_SECONDS=$CJ_TIMEOUT"
+
 {
-  echo "offered_rate: ${K6_RATE} req/s"
-  echo "duration: ${K6_DURATION}"
+  echo "offered_rate: ${CJ_RATE} req/s"
+  echo "duration: ${CJ_DURATION}"
+  echo "preallocated_vus: ${CJ_PREALLOCATED_VUS}"
+  echo "max_vus: ${CJ_MAX_VUS}"
+  echo "judge_timeout_seconds: ${CJ_TIMEOUT}"
+  echo "scenario: ${SCENARIO}"
   echo "worker_concurrency: 1"
 } >> "$RESULTS/meta.txt"
 
+# Pre-compute expected submission count range.
+# rate * duration_in_seconds * 1.3 → upper bound, 0.5 → lower bound
+DURATION_SECS=$(echo "$CJ_DURATION" | sed 's/m$/*60/' | bc)
+EXPECTED_MIN=$(echo "$CJ_RATE * $DURATION_SECS * 0.5 / 1" | bc 2>/dev/null || echo 30)
+EXPECTED_MAX=$(echo "$CJ_RATE * $DURATION_SECS * 1.5 / 1" | bc 2>/dev/null || echo 360)
+
+validate_summary() {
+  local summary="$1" label="$2"
+  [ ! -s "$summary" ] && die "$label: summary file missing or empty: $summary"
+  for metric in $REQUIRED_METRICS; do
+    jq -e ".metrics[\"$metric\"]" "$summary" >/dev/null 2>&1 || die "$label: required metric '$metric' missing from $summary"
+  done
+  local dropped=$(jq -r '.metrics.dropped_iterations.count // 0' "$summary" 2>/dev/null)
+  if [ "${dropped:-0}" != "0" ] && [ "${dropped:-0}" != "null" ]; then
+    die "$label: dropped iterations = $dropped, must be 0"
+  fi
+  local created=$(jq -r '.metrics.submissions_created.count // 0' "$summary" 2>/dev/null)
+  local iterations=$(jq -r '.metrics.iterations.count // 0' "$summary" 2>/dev/null)
+  local accepted=$(jq -r '.metrics.submissions_accepted.count // 0' "$summary" 2>/dev/null)
+  if [ "$created" != "$iterations" ]; then
+    die "$label: submissions_created ($created) != iterations ($iterations)"
+  fi
+  local min_accepted=$(echo "$created * 0.95 / 1" | bc 2>/dev/null || echo 0)
+  if [ "$accepted" -lt "$min_accepted" ]; then
+    die "$label: accepted ($accepted) < 95% of created ($created)"
+  fi
+  if [ "$created" -lt "$EXPECTED_MIN" ] || [ "$created" -gt "$EXPECTED_MAX" ]; then
+    die "$label: created=$created outside expected range [$EXPECTED_MIN, $EXPECTED_MAX]"
+  fi
+  info "  summary valid: $label (created=$created, accepted=$accepted, iterations=$iterations, dropped=0)"
+}
+
 for workers in 1 2 4; do
-  # Pre-round: confirm Pending is 0.
   PRE_PENDING=$(docker compose exec -T redis redis-cli XPENDING judge:submissions judge-workers 2>/dev/null | awk '{print $1}' || echo -1)
   if [ "${PRE_PENDING:-0}" != "0" ]; then
     die "pre-round Redis Pending is $PRE_PENDING, expected 0"
@@ -78,7 +113,6 @@ for workers in 1 2 4; do
   info "=== scaling to $workers worker(s) ==="
   docker compose up -d --scale worker=$workers --wait
 
-  # Wait for Prometheus discovery — must reach target count or die.
   info "waiting for $workers healthy worker target(s)..."
   found=0
   for i in $(seq 1 30); do
@@ -94,7 +128,6 @@ for workers in 1 2 4; do
   fi
   info "  $workers worker target(s) confirmed"
 
-  # Capture peak pending (samples every 5s during run).
   info "starting pending capture..."
   PENDING_LOG="$RESULTS/pending-w${workers}.csv"
   echo "ts,count" > "$PENDING_LOG"
@@ -121,22 +154,11 @@ for workers in 1 2 4; do
     die "k6 returned non-zero (threshold failures), exit=$k6_exit"
   fi
 
-  # Validate summary file exists and contains required metrics.
-  if [ ! -s "$SUMMARY" ]; then
-    die "k6 summary file missing or empty: $SUMMARY"
-  fi
-  for metric in $REQUIRED_METRICS; do
-    if ! jq -e ".metrics[\"$metric\"]" "$SUMMARY" >/dev/null 2>&1; then
-      die "required metric '$metric' missing from $SUMMARY"
-    fi
-  done
-  info "  summary file validated: $SUMMARY"
+  validate_summary "$SUMMARY" "worker-$workers"
 
-  # Extract peak pending.
   PEAK=$(awk -F',' 'NR>1 {if($2+0>max) max=$2+0} END{print max+0}' "$PENDING_LOG")
   echo "peak_pending_w${workers}: $PEAK" >> "$RESULTS/meta.txt"
 
-  # Wait for Pending=0 — must reach zero or die.
   info "waiting for Pending=0..."
   drained=0
   for i in $(seq 1 60); do
@@ -153,7 +175,6 @@ for workers in 1 2 4; do
   info "  Pending drained to 0"
 done
 
-# Final Redis Pending confirmation.
 info "final Redis Pending check..."
 FINAL_PENDING=$(docker compose exec -T redis redis-cli XPENDING judge:submissions judge-workers 2>/dev/null | awk '{print $1}' || echo -1)
 if [ "${FINAL_PENDING:-0}" != "0" ]; then
@@ -177,7 +198,6 @@ go run "$BENCH_DIR/render-benchmark-report.go" "$RESULTS/meta.txt" \
 if [ ! -s "$REPORT_TMP" ]; then
   die "report file is empty"
 fi
-# Atomic replace: only overwrite the real report on success.
 mv "$REPORT_TMP" "$REPORT"
 
 info "benchmark complete. Report: $REPORT"
