@@ -63,6 +63,7 @@ type WorkerConfig struct {
 	ShutdownGrace     time.Duration
 	JudgeWorkdir      string
 	JudgeImage        string
+	MetricsAddr       string
 }
 
 func ValidateAPI(cfg Config) error {
@@ -113,6 +114,13 @@ func LoadWorker(getenv func(string) string) (WorkerConfig, error) {
 	}
 	if cfg.HeartbeatInterval >= cfg.LeaseDuration {
 		return WorkerConfig{}, fmt.Errorf("heartbeat interval must be shorter than lease duration")
+	}
+	cfg.MetricsAddr = getenv("WORKER_METRICS_ADDR")
+	if cfg.MetricsAddr == "" {
+		cfg.MetricsAddr = ":9091"
+	}
+	if cfg.MetricsAddr == "off" {
+		cfg.MetricsAddr = ""
 	}
 	return cfg, nil
 }

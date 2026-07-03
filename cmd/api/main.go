@@ -57,6 +57,8 @@ func main() {
 				slog.Error("outbox relay stopped", "error", err)
 			}
 		}()
+		// 启动 Redis Pending 采样器，定期更新队列待处理数量。
+		go metrics.SamplePending(ctx, metrics.RedisPendingFetcher{Client: client}, queue.DefaultJudgeStream, queue.DefaultJudgeGroup, metricsApp.SetQueuePending, 5*time.Second)
 		slog.Info("outbox relay enabled", "relay_id", relayID)
 	} else {
 		slog.Warn("memory mode has no cross-process judge relay")

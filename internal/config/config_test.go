@@ -74,6 +74,35 @@ func TestLoadWorkerRejectsHeartbeatNotShorterThanLease(t *testing.T) {
 	}
 }
 
+func TestWorkerMetricsAddrDefaultsAndOverrides(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		env  string
+		want string
+	}{
+		{name: "default", env: "", want: ":9091"},
+		{name: "custom", env: ":9191", want: ":9191"},
+		{name: "off", env: "off", want: ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			values := map[string]string{
+				"DATABASE_URL":        "postgres://db",
+				"REDIS_ADDR":          "redis:6379",
+				"WORKER_METRICS_ADDR": tt.env,
+			}
+			cfg, err := config.LoadWorker(func(key string) string { return values[key] })
+			if err != nil {
+				t.Fatal(err)
+			}
+			if cfg.MetricsAddr != tt.want {
+				t.Errorf("MetricsAddr = %q, want %q", cfg.MetricsAddr, tt.want)
+			}
+		})
+	}
+}
+
 func TestValidateAPIRejectsPartialDurableConfiguration(t *testing.T) {
 	t.Parallel()
 	cfg := config.Load(func(key string) string {
