@@ -3,9 +3,9 @@ import { createSubmission, pollUntilTerminal, findSumProblem } from './lib/clien
 import { byLanguage } from './lib/programs.js';
 
 const judgeTerminalDuration = new Trend('judge_terminal_duration');
-// 使用 Python 作为基准语言，避免 Docker-in-Docker 编译开销影响吞吐量测量。
-// Go/C++ 在 Docker-in-Docker 中编译耗时会因宿主机资源竞争导致超时，
-// 这不代表 codingJudge 代码缺陷，而是 macOS Docker Desktop 的已知限制。
+// 基准测试使用 Python，规避 macOS Docker Desktop 的 Docker-in-Docker 编译资源竞争。
+// Go/C++ 编译在 Linux 原生 Docker 环境下正常运行，但在 macOS Docker-in-Docker
+// 中多 Worker 并发编译时编译耗时可能超过判题租约。这是已知环境限制。
 const languages = ['python'];
 
 export const options = {
@@ -28,7 +28,7 @@ export default function () {
   const problem = findSumProblem();
   if (!problem) return;
 
-  // 确定性语言轮换：使用 VU 和迭代编号，避免 Math.random。
+  // 确定性语言轮换。
   const language = languages[(__VU + __ITER) % languages.length];
   const code = byLanguage(language);
 

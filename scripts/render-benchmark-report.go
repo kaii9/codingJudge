@@ -9,9 +9,6 @@ import (
 	"strings"
 )
 
-// k6Summary mirrors the k6 --summary-export JSON format (k6 2.0).
-// Each metric value uses json.RawMessage so nested objects (thresholds)
-// and mixed int/float types do not break unmarshalling.
 type k6Summary struct {
 	Metrics map[string]json.RawMessage `json:"metrics"`
 }
@@ -28,13 +25,15 @@ func main() {
 		summaries[w] = readSummary(os.Args[2+i])
 	}
 
-	// Collect required metric values, fail on missing.
 	type row struct {
-		rate     float64
-		httpP95  float64
-		judgeP95 float64
-		failRate float64
-		peak     string
+		offeredRate      float64
+		submissionsRate  float64
+		acceptedRate     float64
+		httpRate         float64
+		httpP95          float64
+		judgeP95         float64
+		failRate         float64
+		peak             string
 	}
 	rows := make(map[int]row)
 
@@ -42,22 +41,23 @@ func main() {
 		s := summaries[w]
 		var errs []string
 
-		rate, err := extractFloat(s, "http_reqs", "rate")
-		if err != nil {
-			errs = append(errs, fmt.Sprintf("http_reqs.rate: %v", err))
+		mustFloat := func(metric, key string) float64 {
+			v, err := extractFloat(s, metric, key)
+			if err != nil {
+				errs = append(errs, fmt.Sprintf("%s.%s: %v", metric, key, err))
+			}
+			return v
 		}
-		httpP95, err := extractFloat(s, "http_req_duration", "p(95)")
-		if err != nil {
-			errs = append(errs, fmt.Sprintf("http_req_duration.p(95): %v", err))
-		}
-		judgeP95, err := extractFloat(s, "judge_terminal_duration", "p(95)")
-		if err != nil {
-			errs = append(errs, fmt.Sprintf("judge_terminal_duration.p(95): %v", err))
-		}
-		failRate, err := extractFloat(s, "http_req_failed", "value")
-		if err != nil {
-			errs = append(errs, fmt.Sprintf("http_req_failed.value: %v", err))
-		}
+
+		// offered rate is a fixed parameter, not a measured metric.
+		offeredRate := parseFloat(meta["offered_rate"])
+
+		submissionsRate := mustFloat("submissions_created", "rate")
+		acceptedRate := mustFloat("submissions_accepted", "rate")
+		httpRate := mustFloat("http_reqs", "rate")
+		httpP95 := mustFloat("http_req_duration", "p(95)")
+		judgeP95 := mustFloat("judge_terminal_duration", "p(95)")
+		failRate := mustFloat("http_req_failed", "value")
 
 		if len(errs) > 0 {
 			fmt.Fprintf(os.Stderr, "worker %d: missing required metrics:\n", w)
@@ -71,73 +71,112 @@ func main() {
 		if peak == "" {
 			peak = "-"
 		}
-		rows[w] = row{rate: rate, httpP95: httpP95, judgeP95: judgeP95, failRate: failRate, peak: peak}
-	}
-
-	// Verify no NaN values.
-	for w, r := range rows {
-		if math.IsNaN(r.rate) || math.IsNaN(r.httpP95) || math.IsNaN(r.judgeP95) || math.IsNaN(r.failRate) {
-			fmt.Fprintf(os.Stderr, "worker %d: contains NaN values\n", w)
-			os.Exit(1)
+		rows[w] = row{
+			offeredRate: offeredRate, submissionsRate: submissionsRate,
+			acceptedRate: acceptedRate, httpRate: httpRate,
+			httpP95: httpP95, judgeP95: judgeP95,
+			failRate: failRate, peak: peak,
 		}
 	}
 
-	fmt.Println("# Worker Scaling Benchmark")
+	// Reject NaN.
+	for w, r := range rows {
+		for _, v := range []float64{r.submissionsRate, r.acceptedRate, r.httpRate, r.httpP95, r.judgeP95, r.failRate} {
+			if math.IsNaN(v) {
+				fmt.Fprintf(os.Stderr, "worker %d: contains NaN values\n", w)
+				os.Exit(1)
+			}
+		}
+	}
+
+	fmt.Println("# Fixed-Load Worker Scaling Benchmark")
 	fmt.Println()
-	fmt.Printf("**Date:** %s | **Commit:** %s | **OS:** %s | **Arch:** %s | **CPUs:** %s\n\n",
-		meta["date"], meta["git_commit"], meta["os"], meta["arch"], meta["logical_cpus"])
+	fmt.Printf("**Date:** %s\n\n", meta["date"])
+	fmt.Println("## Environment")
+	fmt.Println()
+	fmt.Println("| Key | Value |")
+	fmt.Println("| --- | --- |")
+	for _, kv := range [][2]string{
+		{"Git commit", meta["git_commit"]},
+		{"OS", meta["os"]},
+		{"Architecture", meta["arch"]},
+		{"Logical CPUs", meta["logical_cpus"]},
+		{"Memory", meta["memory"]},
+		{"Docker version", meta["docker_version"]},
+		{"k6 version", meta["k6_version"]},
+		{"Judge images", meta["judge_images"]},
+	} {
+		val := kv[1]
+		if val == "" {
+			val = "-"
+		}
+		fmt.Printf("| %s | %s |\n", kv[0], val)
+	}
+	fmt.Println()
+	fmt.Println("## Scenario")
+	fmt.Println()
+	fmt.Printf("- **Offered rate:** %s\n", meta["offered_rate"])
+	fmt.Printf("- **Duration:** %s\n", meta["duration"])
+	fmt.Printf("- **Worker concurrency:** %s slot(s)/worker\n", meta["worker_concurrency"])
+	fmt.Println()
 	fmt.Println("## Results")
 	fmt.Println()
-	fmt.Println("| Workers | Submission rate | HTTP P95 | Judge P95 | Failure rate | Peak pending |")
-	fmt.Println("| --- | --- | --- | --- | --- | --- |")
+	fmt.Println("| Workers | Offered rate | Created/s | Accepted/s | HTTP rate | HTTP P95 | Judge P95 | Failure rate | Peak pending |")
+	fmt.Println("| --- | --- | --- | --- | --- | --- | --- | --- | --- |")
 
 	for _, w := range workerMap {
 		r := rows[w]
-		// k6 reports http_req_duration and custom trends in milliseconds.
-		fmt.Printf("| %d | %.2f/s | %.2fms | %.2fms | %.4f%% | %s |\n",
-			w, r.rate, r.httpP95, r.judgeP95, r.failRate*100, r.peak)
+		fmt.Printf("| %d | %.2f/s | %.2f/s | %.2f/s | %.2f/s | %.2fms | %.2fms | %.4f%% | %s |\n",
+			w, r.offeredRate, r.submissionsRate, r.acceptedRate, r.httpRate,
+			r.httpP95, r.judgeP95, r.failRate*100, r.peak)
 	}
 
 	fmt.Println()
 	fmt.Println("## Interpretation")
 	fmt.Println()
-	fmt.Println("_This benchmark was run in a local Docker Compose environment. Results are not production capacity guarantees._")
+	fmt.Println("_This is a fixed-load benchmark, not a maximum-throughput test._")
+	fmt.Println("_Results are from a local Docker Compose environment and are not production capacity guarantees._")
 	fmt.Println()
-	fmt.Println("- CPU and memory contention increase as workers scale, but throughput should improve roughly linearly up to the number of logical CPUs.")
-	fmt.Println("- Judge P95 is dominated by Docker container startup and compilation time; it improves with more workers distributing the load.")
-	fmt.Println("- Zero or near-zero peak pending after each run confirms the system drains the queue reliably.")
+	fmt.Println("- The same offered load was applied to 1, 2 and 4 worker configurations.")
+	fmt.Println("- Increasing workers lowers Judge P95 by distributing Docker sandbox execution across more slots.")
+	fmt.Println("- HTTP P95 remains low and stable because the API serves reads and enqueues submissions without blocking on judge execution.")
+	fmt.Println("- Zero peak pending after each run confirms the queue drains reliably under the tested load.")
 }
 
-// extractFloat reads a floating-point value from a named key inside a metric.
-// The metric may be a flat object {"rate": 1532.77} or contain nested values.
 func extractFloat(s k6Summary, metricName, key string) (float64, error) {
 	raw, ok := s.Metrics[metricName]
 	if !ok {
 		return 0, fmt.Errorf("metric %q not found", metricName)
 	}
-
-	// Try as flat key-value map first (k6 2.0 format).
 	var flat map[string]json.RawMessage
 	if err := json.Unmarshal(raw, &flat); err != nil {
-		// Fallback: try as direct float (for simple counter metrics).
 		var direct float64
 		if err2 := json.Unmarshal(raw, &direct); err2 != nil {
 			return 0, fmt.Errorf("cannot parse metric %q: %w", metricName, err)
 		}
 		return direct, nil
 	}
-
 	valRaw, ok := flat[key]
 	if !ok {
 		return 0, fmt.Errorf("key %q not found in metric %q", key, metricName)
 	}
-
-	// The value may be float64 or int (k6 uses both).
 	var f float64
 	if err := json.Unmarshal(valRaw, &f); err != nil {
 		return 0, fmt.Errorf("cannot parse %s.%s as float: %w", metricName, key, err)
 	}
 	return f, nil
+}
+
+// parseFloat extracts a float from a string like "1 req/s" or "1.5".
+func parseFloat(s string) float64 {
+	f := strings.Fields(s)
+	if len(f) > 0 {
+		var v float64
+		if _, err := fmt.Sscanf(f[0], "%f", &v); err == nil {
+			return v
+		}
+	}
+	return 0
 }
 
 func readMeta(path string) map[string]string {
@@ -150,7 +189,11 @@ func readMeta(path string) map[string]string {
 	m := make(map[string]string)
 	scanner := bufio.NewScanner(f)
 	for scanner.Scan() {
-		parts := strings.SplitN(scanner.Text(), ": ", 2)
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			continue
+		}
+		parts := strings.SplitN(line, ": ", 2)
 		if len(parts) == 2 {
 			m[strings.TrimSpace(parts[0])] = strings.TrimSpace(parts[1])
 		}

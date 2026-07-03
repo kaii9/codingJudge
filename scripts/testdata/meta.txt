@@ -1,8 +1,15 @@
-date: 2026-07-03T07:35:45Z
-git_commit: 03ee3cd
+date: 2026-07-03T12:00:00Z
+git_commit: abc1234
 os: Darwin
 arch: arm64
 logical_cpus: 8
-peak_pending_w1: -
-peak_pending_w2: -
-peak_pending_w4: -
+memory: 16 GB
+docker_version: 25.0.3
+k6_version: 2.0.0
+judge_images: golang:1.25-alpine, python:3.12-alpine, gcc:13
+offered_rate: 1 req/s
+duration: 2m
+worker_concurrency: 1
+peak_pending_w1: 1
+peak_pending_w2: 2
+peak_pending_w4: 4

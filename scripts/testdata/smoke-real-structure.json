@@ -35,6 +35,18 @@
       "avg": 1500.0,
       "p(90)": 2500.0,
       "p(95)": 3000.0
+    },
+    "submissions_created": {
+      "rate": 0.8,
+      "count": 120,
+      "type": "counter",
+      "contains": "default"
+    },
+    "submissions_accepted": {
+      "rate": 0.75,
+      "count": 112,
+      "type": "counter",
+      "contains": "default"
     }
   }
 }

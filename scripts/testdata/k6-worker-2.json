@@ -1,8 +1,10 @@
 {
   "metrics": {
-    "http_reqs": {"rate": 16.2, "count": 972},
-    "http_req_duration": {"avg": 60.8, "p(90)": 140.1, "p(95)": 170.3},
-    "http_req_failed": {"value": 0.0, "passes": 972, "fails": 0},
-    "judge_terminal_duration": {"avg": 1400.0, "p(90)": 2300.0, "p(95)": 2700.0}
+    "submissions_created": {"rate": 0.90, "count": 108, "type": "counter", "contains": "default"},
+    "submissions_accepted": {"rate": 0.85, "count": 102, "type": "counter", "contains": "default"},
+    "http_reqs": {"rate": 48.82, "count": 5858},
+    "http_req_duration": {"avg": 2.0, "p(90)": 5.5, "p(95)": 8.54, "thresholds": {"p(95)<300": false}},
+    "http_req_failed": {"value": 0.0, "passes": 5858, "fails": 0, "thresholds": {"rate<0.01": false}},
+    "judge_terminal_duration": {"avg": 1500.0, "p(90)": 1700.0, "p(95)": 1800.0}
   }
 }

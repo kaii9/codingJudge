@@ -27,16 +27,21 @@ func TestRenderFromFixtures(t *testing.T) {
 
 	output := string(out)
 	for _, want := range []string{
-		"| Workers | Submission rate | HTTP P95 | Judge P95 | Failure rate | Peak pending |",
+		"| Workers | Offered rate | Created/s | Accepted/s | HTTP rate | HTTP P95 | Judge P95 | Failure rate | Peak pending |",
 		"| 1 |",
 		"| 2 |",
 		"| 4 |",
-		"150.70ms",
+		"# Fixed-Load Worker Scaling Benchmark",
+		"## Environment",
 		"## Interpretation",
+		"fixed-load benchmark",
 	} {
 		if !strings.Contains(output, want) {
 			t.Errorf("missing %q in output:\n%s", want, output)
 		}
+	}
+	if strings.Contains(output, "NaN") {
+		t.Errorf("output must not contain NaN:\n%s", output)
 	}
 
 	// Missing summary file should return non-zero.
@@ -47,9 +52,6 @@ func TestRenderFromFixtures(t *testing.T) {
 }
 
 func TestParseRealK6Structure(t *testing.T) {
-	// This test verifies the renderer can handle real k6 2.0 JSON that
-	// includes nested objects like "thresholds": {}, int values, etc.
-	// The current map[string]float64 parser will fail on this.
 	tmp := t.TempDir()
 	binary := tmp + "/render"
 	if out, err := exec.Command("go", "build", "-o", binary, ".").CombinedOutput(); err != nil {
@@ -68,11 +70,9 @@ func TestParseRealK6Structure(t *testing.T) {
 	}
 
 	output := string(out)
-	// Must NOT contain "NaN".
 	if strings.Contains(output, "NaN") {
 		t.Errorf("output must not contain NaN:\n%s", output)
 	}
-	// Must contain the result table.
 	if !strings.Contains(output, "| Workers |") {
 		t.Error("missing result table")
 	}
@@ -85,9 +85,6 @@ func TestRenderFailsOnMissingMetric(t *testing.T) {
 		t.Fatalf("build: %v\n%s", err, out)
 	}
 
-	// Create a JSON with missing required metrics.
-	// Use the real-structure file but for workers 2 and 4 use empty files.
-	// Missing file should cause non-zero exit.
 	errCmd := exec.Command(binary, "testdata/meta.txt", "testdata/smoke-real-structure.json", "nonexistent.json", "nonexistent2.json")
 	if errCmd.Run() == nil {
 		t.Error("expected non-zero exit for missing file")
@@ -96,7 +93,6 @@ func TestRenderFailsOnMissingMetric(t *testing.T) {
 
 func TestMain(m *testing.M) {
 	if err := os.Chdir("scripts"); err != nil {
-		// Already in scripts directory.
 	}
 	os.Exit(m.Run())
 }

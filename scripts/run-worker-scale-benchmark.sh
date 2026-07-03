@@ -5,6 +5,7 @@ BENCH_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(dirname "$BENCH_DIR")"
 RESULTS="$ROOT/loadtest/results"
 REPORT="$ROOT/docs/benchmarks/2026-07-03-worker-scaling.md"
+REPORT_TMP="${REPORT}.tmp"
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -13,8 +14,6 @@ NC='\033[0m'
 info()  { echo -e "${GREEN}[info]${NC} $*"; }
 die()   { echo -e "${RED}[fatal]${NC} $*"; exit 1; }
 warn()  { echo -e "${RED}[warn]${NC} $*"; }
-
-EXIT_CODE=0
 
 # Restore to 2 workers on exit, preserving the original exit code.
 cleanup() {
@@ -28,8 +27,17 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
+mkdir -p "$RESULTS"
+mkdir -p "$(dirname "$REPORT")"
+
 info "building images..."
 docker compose build
+
+# Collect extended metadata.
+DOCKER_VERSION=$(docker version --format '{{.Server.Version}}' 2>/dev/null || echo unknown)
+MEMORY=$(sysctl -n hw.memsize 2>/dev/null | awk '{printf "%.0f GB", $1/1024/1024/1024}' || echo unknown)
+K6_VERSION=$(docker compose --profile loadtest run --rm --entrypoint k6 k6 version 2>/dev/null | head -1 | awk '{print $NF}' || echo unknown)
+JUDGE_IMAGES="golang:1.25-alpine, python:3.12-alpine, gcc:13"
 
 info "recording machine metadata..."
 {
@@ -38,14 +46,35 @@ info "recording machine metadata..."
   echo "os: $(uname -s)"
   echo "arch: $(uname -m)"
   echo "logical_cpus: $(nproc 2>/dev/null || sysctl -n hw.logicalcpu 2>/dev/null || echo unknown)"
+  echo "memory: ${MEMORY}"
+  echo "docker_version: ${DOCKER_VERSION}"
+  echo "k6_version: ${K6_VERSION}"
+  echo "judge_images: ${JUDGE_IMAGES}"
 } > "$RESULTS/meta.txt"
 
 REQUIRED_METRICS="http_reqs http_req_duration http_req_failed"
 
 SCENARIO="${K6_SCENARIO:-submissions.js}"
-K6_ARGS="${K6_ARGS:---env K6_RATE=1 --env K6_VUS=4 --env K6_DURATION=2m --env JUDGE_TIMEOUT_SECONDS=60}"
+K6_RATE="${K6_RATE:-1}"
+K6_VUS="${K6_VUS:-4}"
+K6_DURATION="${K6_DURATION:-2m}"
+K6_TIMEOUT="${K6_TIMEOUT:-60}"
+K6_ARGS="${K6_ARGS:---env K6_RATE=$K6_RATE --env K6_VUS=$K6_VUS --env K6_DURATION=$K6_DURATION --env JUDGE_TIMEOUT_SECONDS=$K6_TIMEOUT}"
+
+# Record scenario parameters in meta.
+{
+  echo "offered_rate: ${K6_RATE} req/s"
+  echo "duration: ${K6_DURATION}"
+  echo "worker_concurrency: 1"
+} >> "$RESULTS/meta.txt"
 
 for workers in 1 2 4; do
+  # Pre-round: confirm Pending is 0.
+  PRE_PENDING=$(docker compose exec -T redis redis-cli XPENDING judge:submissions judge-workers 2>/dev/null | awk '{print $1}' || echo -1)
+  if [ "${PRE_PENDING:-0}" != "0" ]; then
+    die "pre-round Redis Pending is $PRE_PENDING, expected 0"
+  fi
+
   info "=== scaling to $workers worker(s) ==="
   docker compose up -d --scale worker=$workers --wait
 
@@ -133,20 +162,22 @@ fi
 info "  Redis Pending = 0 (confirmed)"
 
 info "rendering report..."
-mkdir -p "$(dirname "$REPORT")"
 for i in 1 2 4; do
   SUMMARY="$RESULTS/k6-worker-${i}.json"
   if [ ! -s "$SUMMARY" ]; then
     die "summary file missing before render: $SUMMARY"
   fi
 done
+rm -f "$REPORT_TMP"
 go run "$BENCH_DIR/render-benchmark-report.go" "$RESULTS/meta.txt" \
   "$RESULTS/k6-worker-1.json" \
   "$RESULTS/k6-worker-2.json" \
-  "$RESULTS/k6-worker-4.json" > "$REPORT"
+  "$RESULTS/k6-worker-4.json" > "$REPORT_TMP"
 
-if [ ! -s "$REPORT" ]; then
+if [ ! -s "$REPORT_TMP" ]; then
   die "report file is empty"
 fi
+# Atomic replace: only overwrite the real report on success.
+mv "$REPORT_TMP" "$REPORT"
 
 info "benchmark complete. Report: $REPORT"

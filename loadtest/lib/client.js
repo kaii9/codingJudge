@@ -1,11 +1,14 @@
 import http from 'k6/http';
 import { check, sleep } from 'k6';
-import { Rate } from 'k6/metrics';
+import { Counter, Rate } from 'k6/metrics';
 
 export const BASE_URL = __ENV.BASE_URL || 'http://api:8080';
 export const JUDGE_TIMEOUT = parseInt(__ENV.JUDGE_TIMEOUT_SECONDS) || 30;
 
 export const logicalFailure = new Rate('logical_failures');
+// 自定义指标：区分 HTTP 请求量与业务提交量。
+export const submissionsCreated = new Counter('submissions_created');
+export const submissionsAccepted = new Counter('submissions_accepted');
 
 export function listProblems() {
   const res = http.get(`${BASE_URL}/problems`);
@@ -29,10 +32,9 @@ export function createSubmission(problemId, language, code) {
     logicalFailure.add(1);
     return null;
   }
+  submissionsCreated.add(1);
   try {
-    const sub = res.json();
-    logicalFailure.add(0);
-    return sub;
+    return res.json();
   } catch (_) {
     logicalFailure.add(1);
     return null;
@@ -52,6 +54,7 @@ export function pollUntilTerminal(submissionId) {
     if (['accepted', 'wrong_answer', 'runtime_error', 'time_limit_exceeded', 'internal_error'].includes(status)) {
       if (status === 'accepted') {
         logicalFailure.add(0);
+        submissionsAccepted.add(1);
       } else {
         logicalFailure.add(1);
       }
