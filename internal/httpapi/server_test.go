@@ -7,12 +7,25 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/kai/codingjudge/internal/domain"
 	"github.com/kai/codingjudge/internal/httpapi"
 	"github.com/kai/codingjudge/internal/store"
 )
+
+// fakeSubmissionMetrics records SubmissionCreated calls for testing.
+type fakeSubmissionMetrics struct {
+	mu     sync.Mutex
+	languages []string
+}
+
+func (f *fakeSubmissionMetrics) SubmissionCreated(language string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.languages = append(f.languages, language)
+}
 
 func TestHealthz(t *testing.T) {
 	t.Parallel()
@@ -210,6 +223,54 @@ func TestListSubmissionsReturnsHistoryWithoutCode(t *testing.T) {
 	}
 	if got[0].Code != "" || got[1].Code != "" {
 		t.Fatalf("submission history should not expose code: %+v", got)
+	}
+}
+
+func TestServerRecordsSubmissionLanguage(t *testing.T) {
+	st := store.NewMemoryStore(testProblems())
+	metrics := &fakeSubmissionMetrics{}
+	server := httpapi.NewServer(st, httpapi.WithSubmissionMetrics(metrics))
+
+	payload := []byte(`{"problemId":"sum","language":"go","code":"package main\nfunc main(){}"}`)
+	req := httptest.NewRequest(http.MethodPost, "/submissions", bytes.NewReader(payload))
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusAccepted)
+	}
+
+	metrics.mu.Lock()
+	defer metrics.mu.Unlock()
+
+	if len(metrics.languages) != 1 {
+		t.Fatalf("expected 1 submission metric, got %d", len(metrics.languages))
+	}
+	if metrics.languages[0] != "go" {
+		t.Errorf("language = %q, want go", metrics.languages[0])
+	}
+}
+
+func TestServerDoesNotRecordFailedSubmission(t *testing.T) {
+	st := store.NewMemoryStore(testProblems())
+	metrics := &fakeSubmissionMetrics{}
+	server := httpapi.NewServer(st, httpapi.WithSubmissionMetrics(metrics))
+
+	// Missing required fields — should return 400 without recording.
+	req := httptest.NewRequest(http.MethodPost, "/submissions", strings.NewReader(`{}`))
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusBadRequest)
+	}
+
+	metrics.mu.Lock()
+	defer metrics.mu.Unlock()
+	if len(metrics.languages) != 0 {
+		t.Errorf("expected 0 submissions recorded for failed request, got %d: %v", len(metrics.languages), metrics.languages)
 	}
 }
 

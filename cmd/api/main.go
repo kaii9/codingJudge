@@ -13,10 +13,14 @@ import (
 
 	"github.com/kai/codingjudge/internal/config"
 	"github.com/kai/codingjudge/internal/httpapi"
+	"github.com/kai/codingjudge/internal/metrics"
 	"github.com/kai/codingjudge/internal/outbox"
 	"github.com/kai/codingjudge/internal/problems"
 	"github.com/kai/codingjudge/internal/queue"
 	"github.com/kai/codingjudge/internal/store"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/collectors"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -36,6 +40,12 @@ func main() {
 	}
 	defer cleanupStore()
 
+	// 创建独立的 Prometheus 注册器，注册 Go/Process 基础采集器和应用指标。
+	registry := prometheus.NewRegistry()
+	registry.MustRegister(collectors.NewGoCollector())
+	registry.MustRegister(collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}))
+	metricsApp := metrics.New(registry)
+
 	if cfg.QueueMode == config.QueueRedisStreams {
 		client := redis.NewClient(&redis.Options{Addr: cfg.RedisAddr})
 		defer client.Close()
@@ -53,8 +63,12 @@ func main() {
 	}
 
 	server := &http.Server{
-		Addr:              cfg.APIAddr,
-		Handler:           httpapi.AccessLog(httpapi.NewServer(st), slog.Default()),
+		Addr: cfg.APIAddr,
+		Handler: httpapi.AccessLog(httpapi.NewServer(st,
+			httpapi.WithHTTPMetrics(metricsApp),
+			httpapi.WithSubmissionMetrics(metricsApp),
+			httpapi.WithMetricsHandler(promhttp.HandlerFor(registry, promhttp.HandlerOpts{})),
+		), slog.Default()),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 	go func() {

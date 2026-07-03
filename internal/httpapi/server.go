@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/kai/codingjudge/internal/domain"
@@ -23,16 +24,65 @@ type ProblemStore interface {
 }
 
 type Server struct {
-	store  ProblemStore
-	router http.Handler
+	store             ProblemStore
+	router            http.Handler
+	metricsHandler    http.Handler
+	httpMetrics       HTTPMetrics
+	submissionMetrics SubmissionMetrics
 }
 
-func NewServer(store ProblemStore) *Server {
+// HTTPMetrics records HTTP-level observations.
+type HTTPMetrics interface {
+	ObserveHTTP(method, route string, status int, duration time.Duration)
+}
+
+// SubmissionMetrics records submission creation events.
+type SubmissionMetrics interface {
+	SubmissionCreated(language string)
+}
+
+// Option configures a Server.
+type Option func(*Server)
+
+// WithMetricsHandler adds a GET /metrics endpoint served by the given handler.
+func WithMetricsHandler(handler http.Handler) Option {
+	return func(s *Server) {
+		s.metricsHandler = handler
+	}
+}
+
+// WithHTTPMetrics sets the HTTP observer; when set, ObserveHTTP middleware is
+// applied inside the chi routing chain so route patterns are available.
+func WithHTTPMetrics(m HTTPMetrics) Option {
+	return func(s *Server) {
+		s.httpMetrics = m
+	}
+}
+
+// WithSubmissionMetrics sets the submission creation recorder.
+func WithSubmissionMetrics(m SubmissionMetrics) Option {
+	return func(s *Server) {
+		s.submissionMetrics = m
+	}
+}
+
+func NewServer(store ProblemStore, options ...Option) *Server {
 	s := &Server{store: store}
+	for _, opt := range options {
+		opt(s)
+	}
 	r := chi.NewRouter()
+	if s.httpMetrics != nil {
+		r.Use(ObserveHTTP(s.httpMetrics))
+	}
 	r.Get("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 	})
+	if s.metricsHandler != nil {
+		r.Get("/metrics", func(w http.ResponseWriter, r *http.Request) {
+			s.metricsHandler.ServeHTTP(w, r)
+		})
+	}
 	r.Get("/problems", s.listProblems)
 	r.Get("/problems/{id}", s.getProblem)
 	r.Post("/submissions", s.createSubmission)
@@ -123,6 +173,9 @@ func (s *Server) createSubmission(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "create submission")
 		return
+	}
+	if s.submissionMetrics != nil {
+		s.submissionMetrics.SubmissionCreated(string(req.Language))
 	}
 	sub.Code = ""
 	writeJSON(w, http.StatusAccepted, sub)
