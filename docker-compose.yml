@@ -142,9 +142,8 @@ services:
     ports:
       - "3001:3000"
     volumes:
-      - ./deploy/grafana/provisioning/datasources/prometheus.yml:/etc/grafana/provisioning/datasources/prometheus.yml:ro
-      - ./deploy/grafana/provisioning/dashboards/dashboards.yml:/etc/grafana/provisioning/dashboards/dashboards.yml:ro
-      - ./deploy/grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ./deploy/grafana/provisioning/datasources:/etc/grafana/provisioning/datasources:ro
+      - ./deploy/grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards:ro
       - grafana-data:/var/lib/grafana
     depends_on:
       prometheus:

@@ -1,0 +1,160 @@
+{
+  "title": "GoJudge Overview",
+  "uid": "gojudge-overview",
+  "schemaVersion": 40,
+  "timezone": "utc",
+  "panels": [
+    {
+      "type": "row",
+      "title": "API",
+      "collapsed": false,
+      "gridPos": {"h": 1, "w": 24, "x": 0, "y": 0}
+    },
+    {
+      "title": "HTTP rate",
+      "type": "timeseries",
+      "fieldConfig": {"defaults": {"unit": "reqps"}},
+      "targets": [{"expr": "sum(rate(codingjudge_http_requests_total[1m]))", "refId": "A"}],
+      "gridPos": {"h": 8, "w": 8, "x": 0, "y": 1}
+    },
+    {
+      "title": "HTTP 5xx ratio",
+      "type": "stat",
+      "fieldConfig": {"defaults": {"unit": "percentunit", "decimals": 3, "min": 0}},
+      "targets": [{"expr": "sum(rate(codingjudge_http_requests_total{status_class=\"5xx\"}[5m])) / clamp_min(sum(rate(codingjudge_http_requests_total[5m])), 1e-9)", "refId": "A"}],
+      "gridPos": {"h": 8, "w": 8, "x": 8, "y": 1}
+    },
+    {
+      "title": "HTTP P50",
+      "type": "timeseries",
+      "fieldConfig": {"defaults": {"unit": "s"}},
+      "targets": [{"expr": "histogram_quantile(0.50, sum by (le) (rate(codingjudge_http_request_duration_seconds_bucket[5m])))", "refId": "A"}],
+      "gridPos": {"h": 8, "w": 8, "x": 16, "y": 1}
+    },
+    {
+      "title": "HTTP P95",
+      "type": "timeseries",
+      "fieldConfig": {"defaults": {"unit": "s"}},
+      "targets": [{"expr": "histogram_quantile(0.95, sum by (le) (rate(codingjudge_http_request_duration_seconds_bucket[5m])))", "refId": "A"}],
+      "gridPos": {"h": 8, "w": 8, "x": 0, "y": 9}
+    },
+    {
+      "title": "HTTP P99",
+      "type": "timeseries",
+      "fieldConfig": {"defaults": {"unit": "s"}},
+      "targets": [{"expr": "histogram_quantile(0.99, sum by (le) (rate(codingjudge_http_request_duration_seconds_bucket[5m])))", "refId": "A"}],
+      "gridPos": {"h": 8, "w": 8, "x": 8, "y": 9}
+    },
+    {
+      "title": "Submissions created by language",
+      "type": "timeseries",
+      "fieldConfig": {"defaults": {"unit": "reqps"}},
+      "targets": [{"expr": "sum by (language) (rate(codingjudge_submissions_created_total[5m]))", "refId": "A", "legendFormat": "{{language}}"}],
+      "gridPos": {"h": 8, "w": 8, "x": 16, "y": 9}
+    },
+    {
+      "type": "row",
+      "title": "Queue / Outbox",
+      "collapsed": false,
+      "gridPos": {"h": 1, "w": 24, "x": 0, "y": 17}
+    },
+    {
+      "title": "Queue pending jobs",
+      "type": "timeseries",
+      "fieldConfig": {"defaults": {"unit": "short"}},
+      "targets": [{"expr": "codingjudge_queue_pending_jobs", "refId": "A"}],
+      "gridPos": {"h": 8, "w": 8, "x": 0, "y": 18}
+    },
+    {
+      "title": "Outbox publish rate by result",
+      "type": "timeseries",
+      "fieldConfig": {"defaults": {"unit": "reqps"}},
+      "targets": [{"expr": "sum by (result) (rate(codingjudge_outbox_publish_total[5m]))", "refId": "A", "legendFormat": "{{result}}"}],
+      "gridPos": {"h": 8, "w": 8, "x": 8, "y": 18}
+    },
+    {
+      "type": "row",
+      "title": "Worker",
+      "collapsed": false,
+      "gridPos": {"h": 1, "w": 24, "x": 0, "y": 26}
+    },
+    {
+      "title": "Worker retries rate",
+      "type": "timeseries",
+      "fieldConfig": {"defaults": {"unit": "reqps"}},
+      "targets": [{"expr": "sum(rate(codingjudge_worker_retries_total[5m])) or vector(0)", "refId": "A"}],
+      "gridPos": {"h": 8, "w": 6, "x": 0, "y": 27}
+    },
+    {
+      "title": "Worker dead letters rate",
+      "type": "timeseries",
+      "fieldConfig": {"defaults": {"unit": "reqps"}},
+      "targets": [{"expr": "sum(rate(codingjudge_worker_dead_letters_total[5m])) or vector(0)", "refId": "A"}],
+      "gridPos": {"h": 8, "w": 6, "x": 6, "y": 27}
+    },
+    {
+      "title": "Worker slots",
+      "type": "stat",
+      "fieldConfig": {"defaults": {"unit": "short"}},
+      "targets": [{"expr": "sum(codingjudge_worker_slots)", "refId": "A"}],
+      "gridPos": {"h": 8, "w": 6, "x": 12, "y": 27}
+    },
+    {
+      "title": "Worker jobs in-flight",
+      "type": "timeseries",
+      "fieldConfig": {"defaults": {"unit": "short"}},
+      "targets": [{"expr": "sum(codingjudge_worker_jobs_in_flight)", "refId": "A"}],
+      "gridPos": {"h": 8, "w": 6, "x": 18, "y": 27}
+    },
+    {
+      "title": "Worker jobs rate by result",
+      "type": "timeseries",
+      "fieldConfig": {"defaults": {"unit": "reqps"}},
+      "targets": [{"expr": "sum by (result) (rate(codingjudge_worker_jobs_total[5m]))", "refId": "A", "legendFormat": "{{result}}"}],
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 35}
+    },
+    {
+      "title": "Worker job P95",
+      "type": "timeseries",
+      "fieldConfig": {"defaults": {"unit": "s"}},
+      "targets": [{"expr": "histogram_quantile(0.95, sum by (le, language) (rate(codingjudge_worker_job_duration_seconds_bucket[5m])))", "refId": "A", "legendFormat": "{{language}}"}],
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 35}
+    },
+    {
+      "title": "Lease takeovers (15m)",
+      "type": "stat",
+      "fieldConfig": {"defaults": {"unit": "short"}},
+      "targets": [{"expr": "sum(increase(codingjudge_worker_lease_takeovers_total[15m]))", "refId": "A"}],
+      "gridPos": {"h": 8, "w": 6, "x": 0, "y": 43}
+    },
+    {
+      "title": "Accept rate",
+      "type": "stat",
+      "fieldConfig": {"defaults": {"unit": "percentunit", "min": 0, "max": 1}},
+      "targets": [{"expr": "sum(rate(codingjudge_worker_jobs_total{result=\"accepted\"}[5m])) / clamp_min(sum(rate(codingjudge_worker_jobs_total[5m])), 1e-9)", "refId": "A"}],
+      "gridPos": {"h": 8, "w": 6, "x": 6, "y": 43}
+    },
+    {
+      "type": "row",
+      "title": "Judge",
+      "collapsed": false,
+      "gridPos": {"h": 1, "w": 24, "x": 0, "y": 51}
+    },
+    {
+      "title": "Judge cases rate by language and result",
+      "type": "timeseries",
+      "fieldConfig": {"defaults": {"unit": "reqps"}},
+      "targets": [{"expr": "sum by (language, result) (rate(codingjudge_judge_cases_total[5m]))", "refId": "A", "legendFormat": "{{language}} {{result}}"}],
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 52}
+    },
+    {
+      "title": "Judge case P95",
+      "type": "timeseries",
+      "fieldConfig": {"defaults": {"unit": "s"}},
+      "targets": [{"expr": "histogram_quantile(0.95, sum by (le, language) (rate(codingjudge_judge_case_duration_seconds_bucket[5m])))", "refId": "A", "legendFormat": "{{language}}"}],
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 52}
+    }
+  ],
+  "time": {"from": "now-15m", "to": "now"},
+  "refresh": "10s"
+}

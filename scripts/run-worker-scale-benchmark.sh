@@ -64,7 +64,7 @@ for workers in 1 2 4; do
 
   info "running k6 scenario: $SCENARIO"
   SUMMARY="$RESULTS/k6-worker-${workers}.json"
-  docker compose --profile loadtest run --rm k6 run "/scripts/$SCENARIO" $K6_ARGS --summary-export="/results/k6-worker-${workers}.json" 2>&1 || error "k6 returned non-zero (threshold failures)"
+  docker compose --profile loadtest run --rm k6 k6 run "/scripts/$SCENARIO" $K6_ARGS --summary-export="/results/k6-worker-${workers}.json" 2>&1 || error "k6 returned non-zero (threshold failures)"
 
   kill $CAPTURE_PID 2>/dev/null || true
   wait $CAPTURE_PID 2>/dev/null || true
