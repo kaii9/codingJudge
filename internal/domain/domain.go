@@ -126,4 +126,5 @@ type SubmissionClaim struct {
 	ActiveReceipt  string
 	LeaseExpiresAt time.Time
 	Attempts       int
+	LeaseTakeover  bool // 本次认领是在前一个租约过期后的接管
 }

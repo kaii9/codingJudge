@@ -4,12 +4,148 @@ import (
 	"context"
 	"errors"
 	"reflect"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/kai/codingjudge/internal/domain"
 	"github.com/kai/codingjudge/internal/judgeworker"
 )
+
+type fakeWorkerMetrics struct {
+	mu              sync.Mutex
+	starts          int
+	finishCalls     [][3]string // language, result, positive duration
+	retries         int
+	deadLetters     int
+	leaseTakeovers  int
+}
+
+func (m *fakeWorkerMetrics) WorkerJobStarted() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.starts++
+}
+func (m *fakeWorkerMetrics) WorkerJobFinished(language, result string, duration time.Duration) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.finishCalls = append(m.finishCalls, [3]string{language, result, fmtDuration(duration)})
+}
+func (m *fakeWorkerMetrics) WorkerRetry() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.retries++
+}
+func (m *fakeWorkerMetrics) WorkerDeadLetter() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.deadLetters++
+}
+func (m *fakeWorkerMetrics) WorkerLeaseTakeover() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.leaseTakeovers++
+}
+
+func fmtDuration(d time.Duration) string {
+	if d > 0 { return "positive" }
+	return "zero"
+}
+
+func TestProcessorRecordsAcceptedMetric(t *testing.T) {
+	calls := []string{}
+	st := &fakeStore{claim: acquiredClaim(), problem: domain.Problem{ID: "sum"}, completeOK: true, calls: &calls}
+	q := &fakeQueue{job: domain.Job{SubmissionID: "sub-1", Receipt: "1-0"}, calls: &calls}
+	j := &fakeJudge{result: domain.JudgeResult{Status: domain.StatusAccepted}, calls: &calls}
+	m := &fakeWorkerMetrics{}
+	p := judgeworker.NewProcessor(st, q, j, judgeworker.Config{
+		WorkerID: "worker-a", LeaseDuration: time.Minute, HeartbeatInterval: time.Hour,
+		Token: func() (string, error) { return "token", nil }, Metrics: m,
+	})
+	if err := p.ProcessOne(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.starts != 1 {
+		t.Errorf("starts = %d, want 1", m.starts)
+	}
+	if len(m.finishCalls) != 1 || m.finishCalls[0][0] != "go" || m.finishCalls[0][1] != "accepted" || m.finishCalls[0][2] != "positive" {
+		t.Errorf("finish calls = %v", m.finishCalls)
+	}
+}
+
+func TestProcessorRecordsRetryMetric(t *testing.T) {
+	calls := []string{}
+	st := &fakeStore{claim: acquiredClaim(), problem: domain.Problem{ID: "sum"}, releaseOK: true, calls: &calls}
+	q := &fakeQueue{job: domain.Job{SubmissionID: "sub-1", Receipt: "1-0"}, calls: &calls}
+	j := &fakeJudge{err: errors.New("docker unavailable"), calls: &calls}
+	m := &fakeWorkerMetrics{}
+	p := judgeworker.NewProcessor(st, q, j, judgeworker.Config{
+		WorkerID: "worker-a", LeaseDuration: time.Minute, HeartbeatInterval: time.Hour,
+		MaxAttempts: 3, Token: func() (string, error) { return "token", nil }, Metrics: m,
+	})
+	_ = p.ProcessOne(context.Background())
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.retries != 1 {
+		t.Errorf("retries = %d, want 1", m.retries)
+	}
+	if m.starts != 1 {
+		t.Errorf("starts = %d, want 1", m.starts)
+	}
+	if len(m.finishCalls) != 1 || m.finishCalls[0][1] != "infrastructure_error" {
+		t.Errorf("finish calls = %v", m.finishCalls)
+	}
+}
+
+func TestProcessorRecordsDeadLetterMetric(t *testing.T) {
+	calls := []string{}
+	claim := acquiredClaim()
+	claim.Attempts = 3
+	st := &fakeStore{claim: claim, problem: domain.Problem{ID: "sum"}, completeOK: true, calls: &calls}
+	q := &fakeQueue{job: domain.Job{SubmissionID: "sub-1", Receipt: "1-0"}, calls: &calls}
+	j := &fakeJudge{err: errors.New("docker unavailable"), calls: &calls}
+	m := &fakeWorkerMetrics{}
+	p := judgeworker.NewProcessor(st, q, j, judgeworker.Config{
+		WorkerID: "worker-a", LeaseDuration: time.Minute, HeartbeatInterval: time.Hour,
+		MaxAttempts: 3, Token: func() (string, error) { return "token", nil }, Metrics: m,
+	})
+	_ = p.ProcessOne(context.Background())
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.deadLetters != 1 {
+		t.Errorf("deadLetters = %d, want 1", m.deadLetters)
+	}
+	if m.retries != 0 {
+		t.Errorf("retries should be 0 when dead-lettering, got %d", m.retries)
+	}
+	if len(m.finishCalls) != 1 || m.finishCalls[0][1] != "infrastructure_error" {
+		t.Errorf("finish calls = %v", m.finishCalls)
+	}
+}
+
+func TestProcessorRecordsTakeoverMetric(t *testing.T) {
+	calls := []string{}
+	claim := acquiredClaim()
+	claim.LeaseTakeover = true
+	st := &fakeStore{claim: claim, problem: domain.Problem{ID: "sum"}, completeOK: true, calls: &calls}
+	q := &fakeQueue{job: domain.Job{SubmissionID: "sub-1", Receipt: "1-0"}, calls: &calls}
+	j := &fakeJudge{result: domain.JudgeResult{Status: domain.StatusAccepted}, calls: &calls}
+	m := &fakeWorkerMetrics{}
+	p := judgeworker.NewProcessor(st, q, j, judgeworker.Config{
+		WorkerID: "worker-a", LeaseDuration: time.Minute, HeartbeatInterval: time.Hour,
+		Token: func() (string, error) { return "token", nil }, Metrics: m,
+	})
+	if err := p.ProcessOne(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.leaseTakeovers != 1 {
+		t.Errorf("leaseTakeovers = %d, want 1", m.leaseTakeovers)
+	}
+}
 
 type fakeStore struct {
 	claim      domain.SubmissionClaim

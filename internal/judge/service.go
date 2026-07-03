@@ -3,6 +3,7 @@ package judge
 import (
 	"context"
 	"strings"
+	"time"
 
 	"github.com/kai/codingjudge/internal/domain"
 )
@@ -31,18 +32,39 @@ type BatchRunner interface {
 	RunBatch(context.Context, RunRequest, []string) ([]RunResult, error)
 }
 
-type Service struct {
-	runner Runner
+// Metrics records test case evaluation outcomes.
+type Metrics interface {
+	ObserveJudgeCase(language, result string, duration time.Duration)
 }
 
-func NewService(runner Runner) *Service {
-	return &Service{runner: runner}
+// Option configures a judge Service.
+type Option func(*Service)
+
+// WithMetrics sets the judge case metrics recorder.
+func WithMetrics(m Metrics) Option {
+	return func(s *Service) {
+		s.metrics = m
+	}
+}
+
+type Service struct {
+	runner  Runner
+	metrics Metrics
+}
+
+func NewService(runner Runner, options ...Option) *Service {
+	s := &Service{runner: runner}
+	for _, opt := range options {
+		opt(s)
+	}
+	return s
 }
 
 func (s *Service) Evaluate(ctx context.Context, problem domain.Problem, language domain.Language, code string) (domain.JudgeResult, error) {
 	if len(problem.TestCases) == 0 {
 		return domain.JudgeResult{Status: domain.StatusAccepted}, nil
 	}
+	langStr := string(language)
 	baseRequest := RunRequest{
 		Language:      language,
 		Code:          code,
@@ -63,8 +85,10 @@ func (s *Service) Evaluate(ctx context.Context, problem domain.Problem, language
 				break
 			}
 			if result, finished := judgeRun(problem.TestCases[i], run); finished {
+				s.recordCase(langStr, result.Status, run)
 				return result, nil
 			}
+			s.recordCase(langStr, domain.StatusAccepted, run)
 		}
 		if len(runs) != len(problem.TestCases) {
 			return domain.JudgeResult{Status: domain.StatusInternalError, Stderr: "runner returned incomplete results"}, nil
@@ -77,13 +101,24 @@ func (s *Service) Evaluate(ctx context.Context, problem domain.Problem, language
 		request.Input = tc.Input
 		run, err := s.runner.Run(ctx, request)
 		if err != nil {
+			// 基础设施错误不记录用例指标
 			return domain.JudgeResult{}, err
 		}
 		if result, finished := judgeRun(tc, run); finished {
+			s.recordCase(langStr, result.Status, run)
 			return result, nil
 		}
+		s.recordCase(langStr, domain.StatusAccepted, run)
 	}
 	return domain.JudgeResult{Status: domain.StatusAccepted}, nil
+}
+
+func (s *Service) recordCase(language string, status domain.SubmissionStatus, run RunResult) {
+	if s.metrics == nil {
+		return
+	}
+	duration := time.Duration(run.Duration) * time.Millisecond
+	s.metrics.ObserveJudgeCase(language, string(status), duration)
 }
 
 func judgeRun(tc domain.TestCase, run RunResult) (domain.JudgeResult, bool) {

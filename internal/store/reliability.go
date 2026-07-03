@@ -48,6 +48,9 @@ func (s *MemoryStore) ClaimSubmission(_ context.Context, id, workerID, token, re
 		}, nil
 	}
 
+	// 判断是否为租约接管：前置状态为 running 且租约已过期。
+	takeover := sub.Status == domain.StatusRunning
+
 	lease.token = token
 	lease.workerID = workerID
 	lease.receipt = receipt
@@ -66,6 +69,7 @@ func (s *MemoryStore) ClaimSubmission(_ context.Context, id, workerID, token, re
 		Receipt:        receipt,
 		LeaseExpiresAt: lease.expiresAt,
 		Attempts:       lease.attempts,
+		LeaseTakeover:  takeover,
 	}, nil
 }
 

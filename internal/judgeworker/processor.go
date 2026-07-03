@@ -27,6 +27,15 @@ type Judge interface {
 	Evaluate(context.Context, domain.Problem, domain.Language, string) (domain.JudgeResult, error)
 }
 
+// WorkerMetrics records worker-level observations.
+type WorkerMetrics interface {
+	WorkerJobStarted()
+	WorkerJobFinished(language, result string, duration time.Duration)
+	WorkerRetry()
+	WorkerDeadLetter()
+	WorkerLeaseTakeover()
+}
+
 type Config struct {
 	WorkerID          string
 	LeaseDuration     time.Duration
@@ -34,13 +43,15 @@ type Config struct {
 	MaxAttempts       int
 	Now               func() time.Time
 	Token             func() (string, error)
+	Metrics           WorkerMetrics
 }
 
 type Processor struct {
-	store  store.LeaseStore
-	queue  WorkerQueue
-	judge  Judge
-	config Config
+	store   store.LeaseStore
+	queue   WorkerQueue
+	judge   Judge
+	config  Config
+	metrics WorkerMetrics
 }
 
 func NewProcessor(st store.LeaseStore, queue WorkerQueue, judge Judge, config Config) *Processor {
@@ -59,7 +70,7 @@ func NewProcessor(st store.LeaseStore, queue WorkerQueue, judge Judge, config Co
 	if config.Token == nil {
 		config.Token = randomToken
 	}
-	return &Processor{store: st, queue: queue, judge: judge, config: config}
+	return &Processor{store: st, queue: queue, judge: judge, config: config, metrics: config.Metrics}
 }
 
 func (p *Processor) Run(ctx context.Context) error {
@@ -94,6 +105,7 @@ func (p *Processor) ProcessOne(ctx context.Context) error {
 }
 
 func (p *Processor) ProcessJob(ctx context.Context, job domain.Job) error {
+	started := p.config.Now()
 	token, err := p.config.Token()
 	if err != nil {
 		return fmt.Errorf("generate judge token: %w", err)
@@ -108,9 +120,24 @@ func (p *Processor) ProcessJob(ctx context.Context, job domain.Job) error {
 	case domain.ClaimActiveSameReceipt:
 		return nil
 	case domain.ClaimMissing:
+		if p.metrics != nil {
+			p.metrics.WorkerDeadLetter()
+		}
 		return p.queue.DeadLetter(ctx, job, job.Attempts, fmt.Errorf("submission %q not found", job.SubmissionID))
 	case domain.ClaimAcquired:
-		return p.processClaim(ctx, job, claim)
+		if p.metrics != nil {
+			p.metrics.WorkerJobStarted()
+			if claim.LeaseTakeover {
+				p.metrics.WorkerLeaseTakeover()
+			}
+		}
+		err := p.processClaim(ctx, job, claim)
+		if p.metrics != nil {
+			language := string(claim.Submission.Language)
+			result := metricResult(claim.Submission, err)
+			p.metrics.WorkerJobFinished(language, result, p.config.Now().Sub(started))
+		}
+		return err
 	default:
 		return fmt.Errorf("unknown claim state %q", claim.State)
 	}
@@ -203,6 +230,9 @@ func (p *Processor) heartbeat(ctx context.Context, done <-chan struct{}, job dom
 
 func (p *Processor) handleInfrastructureError(ctx context.Context, job domain.Job, claim domain.SubmissionClaim, cause error) error {
 	if claim.Attempts >= p.config.MaxAttempts {
+		if p.metrics != nil {
+			p.metrics.WorkerDeadLetter()
+		}
 		result := domain.JudgeResult{Status: domain.StatusInternalError, Stderr: cause.Error()}
 		completed, err := p.store.CompleteSubmission(ctx, claim.Submission.ID, claim.Token, p.config.Now(), result)
 		if err != nil {
@@ -216,6 +246,9 @@ func (p *Processor) handleInfrastructureError(ctx context.Context, job domain.Jo
 		}
 		return cause
 	}
+	if p.metrics != nil {
+		p.metrics.WorkerRetry()
+	}
 	released, err := p.store.ReleaseSubmission(ctx, claim.Submission.ID, claim.Token, p.config.Now(), cause.Error())
 	if err != nil {
 		return errors.Join(cause, err)
@@ -227,6 +260,33 @@ func (p *Processor) handleInfrastructureError(ctx context.Context, job domain.Jo
 		return errors.Join(cause, err)
 	}
 	return cause
+}
+
+// metricResult 将 JudgeResult 状态映射为 worker metrics 的 result 标签值。
+func metricResult(sub domain.Submission, processErr error) string {
+	if processErr != nil {
+		if errors.Is(processErr, ErrLeaseLost) {
+			return "lease_lost"
+		}
+		return "infrastructure_error"
+	}
+	if sub.Result == nil {
+		return "accepted"
+	}
+	switch sub.Result.Status {
+	case domain.StatusAccepted:
+		return "accepted"
+	case domain.StatusWrongAnswer:
+		return "wrong_answer"
+	case domain.StatusRuntimeError:
+		return "runtime_error"
+	case domain.StatusTimeLimitExceeded:
+		return "time_limit_exceeded"
+	case domain.StatusInternalError:
+		return "internal_error"
+	default:
+		return "accepted"
+	}
 }
 
 func randomToken() (string, error) {

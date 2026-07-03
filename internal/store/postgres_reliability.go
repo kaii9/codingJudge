@@ -100,6 +100,9 @@ func (s *PostgresStore) ClaimSubmission(ctx context.Context, id, workerID, token
 		}, tx.Commit(ctx)
 	}
 
+	// 判断是否为租约接管：前置状态为 running 且租约已过期。
+	takeover := sub.Status == domain.StatusRunning && expiresAt != nil && !now.Before(*expiresAt)
+
 	expires := now.Add(leaseDuration)
 	attempts++
 	if _, err := tx.Exec(ctx, `
@@ -123,6 +126,7 @@ func (s *PostgresStore) ClaimSubmission(ctx context.Context, id, workerID, token
 		Receipt:        receipt,
 		LeaseExpiresAt: expires,
 		Attempts:       attempts,
+		LeaseTakeover:  takeover,
 	}, nil
 }
 

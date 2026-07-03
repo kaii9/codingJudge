@@ -73,6 +73,41 @@ func TestMemoryLeaseRenewReleaseAndExpiry(t *testing.T) {
 	}
 }
 
+func TestMemoryTakeoverClassification(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	now := time.Date(2026, 7, 2, 8, 0, 0, 0, time.UTC)
+	st := store.NewMemoryStore([]domain.Problem{{ID: "sum"}})
+	sub, _ := st.CreateSubmission(ctx, domain.Submission{ProblemID: "sum", Language: domain.LanguageGo, Code: "code"})
+
+	// 首次认领不是接管。
+	first, err := st.ClaimSubmission(ctx, sub.ID, "w1", "t1", "r1", now, 30*time.Second)
+	if err != nil || first.LeaseTakeover {
+		t.Fatalf("first claim should not be takeover: %+v, %v", first, err)
+	}
+
+	// 显式释放后（状态变回 queued），重新认领也不是接管。
+	if _, err := st.ReleaseSubmission(ctx, sub.ID, "t1", now.Add(10*time.Second), "err"); err != nil {
+		t.Fatal(err)
+	}
+	retry, err := st.ClaimSubmission(ctx, sub.ID, "w2", "t2", "r2", now.Add(20*time.Second), 30*time.Second)
+	if err != nil || retry.LeaseTakeover || retry.Attempts != 2 {
+		t.Fatalf("retry claim should not be takeover: %+v, %v", retry, err)
+	}
+
+	// 租约过期后的认领是接管。
+	_, _ = st.ClaimSubmission(ctx, sub.ID, "w3", "t3", "r3", now.Add(20*time.Second), 30*time.Second)
+	// 续租可保持 active
+	if _, err := st.RenewSubmissionLease(ctx, sub.ID, "t3", now.Add(40*time.Second), 30*time.Second); err != nil {
+		t.Fatal(err)
+	}
+	// 时间推进到超过租约过期后，新 worker 认领应为接管
+	takeover, err := st.ClaimSubmission(ctx, sub.ID, "w4", "t4", "r4", now.Add(100*time.Second), 30*time.Second)
+	if err != nil || !takeover.LeaseTakeover || takeover.Attempts != 3 {
+		t.Fatalf("expired lease takeover: %+v, %v", takeover, err)
+	}
+}
+
 func TestMemorySubmissionCreatesAndPublishesOutbox(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
