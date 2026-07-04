@@ -1,12 +1,12 @@
 # Fixed-Load Worker Scaling Benchmark
 
-**Date:** 2026-07-04T07:50:56Z
+**Date:** 2026-07-04T11:07:00Z
 
 ## Environment
 
 | Key | Value |
 | --- | --- |
-| Git commit | fb3b16d |
+| Git commit | 0ceda67 |
 | OS | Darwin |
 | Architecture | arm64 |
 | Logical CPUs | 8 |
@@ -27,9 +27,9 @@
 
 | Workers | Offered rate | Created/s | Accepted/s | HTTP rate | HTTP P95 | Judge P95 | HTTP failure | Logical failure | Peak pending (sampled) |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| 1 | 1.00/s | 1.00/s | 1.00/s | 9.89/s | 6.05ms | 1458.65ms | 0.0000% | 0.0000% | 1 |
-| 2 | 1.00/s | 1.00/s | 1.00/s | 8.88/s | 5.09ms | 829.00ms | 0.0000% | 0.0000% | 1 |
-| 4 | 1.00/s | 1.00/s | 1.00/s | 8.92/s | 4.85ms | 775.40ms | 0.0000% | 0.0000% | 1 |
+| 1 | 1.00/s | 1.00/s | 1.00/s | 52.61/s | 19.18ms | 9489.00ms | 0.0000% | 0.0000% | 1 |
+| 2 | 1.00/s | 1.00/s | 1.00/s | 12.40/s | 17.94ms | 3125.00ms | 0.0000% | 0.0000% | 2 |
+| 4 | 1.00/s | 1.00/s | 1.00/s | 9.03/s | 5.37ms | 837.00ms | 0.0000% | 0.0000% | 1 |
 
 ## Interpretation
 
