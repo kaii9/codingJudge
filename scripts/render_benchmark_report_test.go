@@ -27,7 +27,7 @@ func TestRenderFromFixtures(t *testing.T) {
 
 	output := string(out)
 	for _, want := range []string{
-		"| Workers | Offered rate | Created/s | Accepted/s | HTTP rate | HTTP P95 | Judge P95 | Failure rate | Peak pending (sampled) |",
+		"| Workers | Offered rate | Created/s | Accepted/s | HTTP rate | HTTP P95 | Judge P95 | HTTP failure | Logical failure | Peak pending (sampled) |",
 		"| 1 | 1.00/s | 1.00/s | 1.00/s |",
 		"| 2 | 1.00/s | 1.00/s | 1.00/s |",
 		"| 4 | 1.00/s | 1.00/s | 1.00/s |",
@@ -54,6 +54,95 @@ func TestRenderFromFixtures(t *testing.T) {
 	}
 }
 
+func TestRenderFailsWhenAcceptedLessThanCreated(t *testing.T) {
+	tmp := t.TempDir()
+	binary := tmp + "/render"
+	if out, err := exec.Command("go", "build", "-o", binary, ".").CombinedOutput(); err != nil {
+		t.Fatalf("build: %v\n%s", err, out)
+	}
+
+	// accepted=119, created=120 — must fail (plan requires exact equality).
+	badJSON := tmp + "/bad.json"
+	os.WriteFile(badJSON, []byte(`{
+  "metrics": {
+    "iterations": {"count": 120, "rate": 1.0},
+    "dropped_iterations": {"count": 0},
+    "submissions_created": {"rate": 1.0, "count": 120},
+    "submissions_accepted": {"rate": 0.99, "count": 119},
+    "logical_failures": {"value": 0.0},
+    "http_reqs": {"rate": 45.0, "count": 5400},
+    "http_req_duration": {"avg": 1.0, "p(90)": 3.0, "p(95)": 5.0},
+    "http_req_failed": {"value": 0.0},
+    "judge_terminal_duration": {"avg": 1000.0, "p(90)": 1500.0, "p(95)": 2000.0}
+  }
+}`), 0644)
+
+	cmd := exec.Command(binary, "testdata/meta.txt", badJSON, badJSON, badJSON)
+	if cmd.Run() == nil {
+		t.Error("expected non-zero exit for accepted=119 != created=120")
+	}
+}
+
+func TestRenderFailsOnLogicalFailures(t *testing.T) {
+	tmp := t.TempDir()
+	binary := tmp + "/render"
+	if out, err := exec.Command("go", "build", "-o", binary, ".").CombinedOutput(); err != nil {
+		t.Fatalf("build: %v\n%s", err, out)
+	}
+
+	// logical_failures.value=0.0083 while http_req_failed=0 — must fail.
+	badJSON := tmp + "/logical.json"
+	os.WriteFile(badJSON, []byte(`{
+  "metrics": {
+    "iterations": {"count": 120, "rate": 1.0},
+    "dropped_iterations": {"count": 0},
+    "submissions_created": {"rate": 1.0, "count": 120},
+    "submissions_accepted": {"rate": 1.0, "count": 120},
+    "logical_failures": {"value": 0.0082644628},
+    "http_reqs": {"rate": 45.0, "count": 5400},
+    "http_req_duration": {"avg": 1.0, "p(90)": 3.0, "p(95)": 5.0},
+    "http_req_failed": {"value": 0.0},
+    "judge_terminal_duration": {"avg": 1000.0, "p(90)": 1500.0, "p(95)": 2000.0}
+  }
+}`), 0644)
+
+	cmd := exec.Command(binary, "testdata/meta.txt", badJSON, badJSON, badJSON)
+	if cmd.Run() == nil {
+		t.Error("expected non-zero exit for logical_failures > 0")
+	}
+}
+
+func TestRenderFailsOnWrongArrivalCount(t *testing.T) {
+	tmp := t.TempDir()
+	binary := tmp + "/render"
+	if out, err := exec.Command("go", "build", "-o", binary, ".").CombinedOutput(); err != nil {
+		t.Fatalf("build: %v\n%s", err, out)
+	}
+
+	// offered rate=1/s for 2m → expected=120, tolerance=max(2,120*0.02)=2.4→2
+	// created=100 is outside [118,122] → must fail.
+	tmpl := `{
+  "metrics": {
+    "iterations": {"count": 100, "rate": 0.83},
+    "dropped_iterations": {"count": 0},
+    "submissions_created": {"rate": 0.83, "count": 100},
+    "submissions_accepted": {"rate": 0.83, "count": 100},
+    "logical_failures": {"value": 0.0},
+    "http_reqs": {"rate": 45.0, "count": 5000},
+    "http_req_duration": {"avg": 1.0, "p(90)": 3.0, "p(95)": 5.0},
+    "http_req_failed": {"value": 0.0},
+    "judge_terminal_duration": {"avg": 1000.0, "p(90)": 1500.0, "p(95)": 2000.0}
+  }
+}`
+	badJSON := tmp + "/wrongcount.json"
+	os.WriteFile(badJSON, []byte(tmpl), 0644)
+
+	cmd := exec.Command(binary, "testdata/meta.txt", badJSON, badJSON, badJSON)
+	if cmd.Run() == nil {
+		t.Error("expected non-zero exit for created=100 (expected ~120)")
+	}
+}
+
 func TestRenderFailsOnDroppedIterations(t *testing.T) {
 	tmp := t.TempDir()
 	binary := tmp + "/render"
@@ -61,14 +150,14 @@ func TestRenderFailsOnDroppedIterations(t *testing.T) {
 		t.Fatalf("build: %v\n%s", err, out)
 	}
 
-	// Create a summary with dropped_iterations > 0.
-	badJSON := tmp + "/bad.json"
+	badJSON := tmp + "/dropped.json"
 	os.WriteFile(badJSON, []byte(`{
   "metrics": {
-    "iterations": {"count": 100, "rate": 1.0},
+    "iterations": {"count": 120, "rate": 1.0},
     "dropped_iterations": {"count": 5},
-    "submissions_created": {"rate": 1.0, "count": 100},
-    "submissions_accepted": {"rate": 1.0, "count": 100},
+    "submissions_created": {"rate": 1.0, "count": 120},
+    "submissions_accepted": {"rate": 1.0, "count": 120},
+    "logical_failures": {"value": 0.0},
     "http_reqs": {"rate": 45.0, "count": 5000},
     "http_req_duration": {"avg": 1.0, "p(90)": 3.0, "p(95)": 5.0},
     "http_req_failed": {"value": 0.0},
@@ -89,42 +178,14 @@ func TestRenderFailsOnMismatchedCounts(t *testing.T) {
 		t.Fatalf("build: %v\n%s", err, out)
 	}
 
-	// accepted != created.
 	badJSON := tmp + "/mismatch.json"
-	os.WriteFile(badJSON, []byte(`{
-  "metrics": {
-    "iterations": {"count": 100, "rate": 1.0},
-    "dropped_iterations": {"count": 0},
-    "submissions_created": {"rate": 1.0, "count": 100},
-    "submissions_accepted": {"rate": 0.8, "count": 80},
-    "http_reqs": {"rate": 45.0, "count": 5000},
-    "http_req_duration": {"avg": 1.0, "p(90)": 3.0, "p(95)": 5.0},
-    "http_req_failed": {"value": 0.0},
-    "judge_terminal_duration": {"avg": 1000.0, "p(90)": 1500.0, "p(95)": 2000.0}
-  }
-}`), 0644)
-
-	cmd := exec.Command(binary, "testdata/meta.txt", badJSON, badJSON, badJSON)
-	if cmd.Run() == nil {
-		t.Error("expected non-zero exit for accepted != created")
-	}
-}
-
-func TestRenderFailsOnWrongIterationCount(t *testing.T) {
-	tmp := t.TempDir()
-	binary := tmp + "/render"
-	if out, err := exec.Command("go", "build", "-o", binary, ".").CombinedOutput(); err != nil {
-		t.Fatalf("build: %v\n%s", err, out)
-	}
-
-	// created != iterations.
-	badJSON := tmp + "/baditer.json"
 	os.WriteFile(badJSON, []byte(`{
   "metrics": {
     "iterations": {"count": 80, "rate": 0.8},
     "dropped_iterations": {"count": 0},
     "submissions_created": {"rate": 1.0, "count": 100},
     "submissions_accepted": {"rate": 1.0, "count": 100},
+    "logical_failures": {"value": 0.0},
     "http_reqs": {"rate": 45.0, "count": 5000},
     "http_req_duration": {"avg": 1.0, "p(90)": 3.0, "p(95)": 5.0},
     "http_req_failed": {"value": 0.0},

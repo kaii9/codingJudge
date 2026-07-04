@@ -26,19 +26,33 @@ func main() {
 	}
 
 	type row struct {
-		offeredRate     float64
-		submissionsRate float64
-		acceptedRate    float64
-		httpRate        float64
-		httpP95         float64
-		judgeP95        float64
-		failRate        float64
-		peak            string
+		offeredRate    float64
+		createdRate    float64
+		acceptedRate   float64
+		httpRate       float64
+		httpP95        float64
+		judgeP95       float64
+		httpFailure    float64
+		logicalFailure float64
+		peak           string
 	}
 
 	rows := make(map[int]row)
 	offeredRate := parseFloat(meta["offered_rate"])
 	durationSecs := parseDuration(meta["duration"])
+
+	// Guard: reject zero, negative, NaN, or infinite rate/duration.
+	if offeredRate <= 0 || math.IsNaN(offeredRate) || math.IsInf(offeredRate, 0) {
+		fmt.Fprintf(os.Stderr, "invalid offered rate: %.2f\n", offeredRate)
+		os.Exit(1)
+	}
+	if durationSecs <= 0 || math.IsNaN(durationSecs) || math.IsInf(durationSecs, 0) {
+		fmt.Fprintf(os.Stderr, "invalid duration: %.2f\n", durationSecs)
+		os.Exit(1)
+	}
+
+	expected := offeredRate * durationSecs
+	tolerance := math.Max(2, expected*0.02)
 
 	for _, w := range workerMap {
 		s := summaries[w]
@@ -52,29 +66,40 @@ func main() {
 			return v
 		}
 
-		// Validate: dropped_iterations must be 0 (if present in JSON).
+		// Validate: dropped_iterations must be 0 (if present).
 		if dropped, err := extractFloat(s, "dropped_iterations", "count"); err == nil && dropped != 0 {
-			errs = append(errs, fmt.Sprintf("dropped_iterations = %.0f, must be 0", dropped))
+			errs = append(errs, fmt.Sprintf("dropped_iterations=%.0f, must be 0", dropped))
 		}
 
-		// Validate: submissions_created.count == iterations.count.
+		// Validate: created == iterations.
 		createdCount := mustFloat("submissions_created", "count")
 		iterCount := mustFloat("iterations", "count")
 		if math.Abs(createdCount-iterCount) > 0.5 {
-			errs = append(errs, fmt.Sprintf("submissions_created.count=%.0f != iterations.count=%.0f", createdCount, iterCount))
+			errs = append(errs, fmt.Sprintf("created=%.0f != iterations=%.0f", createdCount, iterCount))
 		}
 
-		// Validate: accepted >= 95% of created.
+		// Validate: accepted == created (exact equality, not 95%).
 		acceptedCount := mustFloat("submissions_accepted", "count")
-		if acceptedCount < createdCount*0.95 {
-			errs = append(errs, fmt.Sprintf("accepted=%.0f < 95%% of created=%.0f", acceptedCount, createdCount))
+		if math.Abs(acceptedCount-createdCount) > 0.5 {
+			errs = append(errs, fmt.Sprintf("accepted=%.0f != created=%.0f", acceptedCount, createdCount))
 		}
 
-		// Validate: created roughly matches offered rate × duration.
-		expected := offeredRate * durationSecs
-		if createdCount < expected*0.5 || createdCount > expected*1.5 {
-			errs = append(errs, fmt.Sprintf("created=%.0f outside expected range [%.0f, %.0f] for %.0f req/s × %.0fs",
-				createdCount, expected*0.5, expected*1.5, offeredRate, durationSecs))
+		// Validate: created count matches offered rate × duration.
+		if math.Abs(createdCount-expected) > tolerance {
+			errs = append(errs, fmt.Sprintf("created=%.0f outside [%.0f, %.0f] (expected %.0f)",
+				createdCount, expected-tolerance, expected+tolerance, expected))
+		}
+
+		// Validate: http_req_failed must be 0.
+		httpFail := mustFloat("http_req_failed", "value")
+		if httpFail > 0 {
+			errs = append(errs, fmt.Sprintf("http_req_failed=%.6f, must be 0", httpFail))
+		}
+
+		// Validate: logical_failures must be 0.
+		logicalFail := mustFloat("logical_failures", "value")
+		if logicalFail > 0 {
+			errs = append(errs, fmt.Sprintf("logical_failures=%.6f, must be 0", logicalFail))
 		}
 
 		submissionsRate := mustFloat("submissions_created", "rate")
@@ -82,7 +107,6 @@ func main() {
 		httpRate := mustFloat("http_reqs", "rate")
 		httpP95 := mustFloat("http_req_duration", "p(95)")
 		judgeP95 := mustFloat("judge_terminal_duration", "p(95)")
-		failRate := mustFloat("http_req_failed", "value")
 
 		if len(errs) > 0 {
 			fmt.Fprintf(os.Stderr, "worker %d: validation failed:\n", w)
@@ -97,18 +121,19 @@ func main() {
 			peak = "-"
 		}
 		rows[w] = row{
-			offeredRate: offeredRate, submissionsRate: submissionsRate,
+			offeredRate: offeredRate, createdRate: submissionsRate,
 			acceptedRate: acceptedRate, httpRate: httpRate,
 			httpP95: httpP95, judgeP95: judgeP95,
-			failRate: failRate, peak: peak,
+			httpFailure: httpFail, logicalFailure: logicalFail,
+			peak: peak,
 		}
 	}
 
-	// Reject NaN.
+	// Reject NaN in any displayed value.
 	for w, r := range rows {
-		for _, v := range []float64{r.submissionsRate, r.acceptedRate, r.httpRate, r.httpP95, r.judgeP95, r.failRate} {
-			if math.IsNaN(v) {
-				fmt.Fprintf(os.Stderr, "worker %d: contains NaN values\n", w)
+		for _, v := range []float64{r.createdRate, r.acceptedRate, r.httpRate, r.httpP95, r.judgeP95, r.httpFailure, r.logicalFailure} {
+			if math.IsNaN(v) || math.IsInf(v, 0) {
+				fmt.Fprintf(os.Stderr, "worker %d: contains NaN/Inf value\n", w)
 				os.Exit(1)
 			}
 		}
@@ -120,7 +145,7 @@ func main() {
 		rates = append(rates, rows[w].offeredRate)
 	}
 	if rates[0] != rates[1] || rates[1] != rates[2] {
-		fmt.Fprintf(os.Stderr, "offered rates differ across rounds: %.2f / %.2f / %.2f\n", rates[0], rates[1], rates[2])
+		fmt.Fprintf(os.Stderr, "offered rates differ: %.2f / %.2f / %.2f\n", rates[0], rates[1], rates[2])
 		os.Exit(1)
 	}
 
@@ -158,14 +183,14 @@ func main() {
 	fmt.Println()
 	fmt.Println("## Results")
 	fmt.Println()
-	fmt.Println("| Workers | Offered rate | Created/s | Accepted/s | HTTP rate | HTTP P95 | Judge P95 | Failure rate | Peak pending (sampled) |")
-	fmt.Println("| --- | --- | --- | --- | --- | --- | --- | --- | --- |")
+	fmt.Println("| Workers | Offered rate | Created/s | Accepted/s | HTTP rate | HTTP P95 | Judge P95 | HTTP failure | Logical failure | Peak pending (sampled) |")
+	fmt.Println("| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |")
 
 	for _, w := range workerMap {
 		r := rows[w]
-		fmt.Printf("| %d | %.2f/s | %.2f/s | %.2f/s | %.2f/s | %.2fms | %.2fms | %.4f%% | %s |\n",
-			w, r.offeredRate, r.submissionsRate, r.acceptedRate, r.httpRate,
-			r.httpP95, r.judgeP95, r.failRate*100, r.peak)
+		fmt.Printf("| %d | %.2f/s | %.2f/s | %.2f/s | %.2f/s | %.2fms | %.2fms | %.4f%% | %.4f%% | %s |\n",
+			w, r.offeredRate, r.createdRate, r.acceptedRate, r.httpRate,
+			r.httpP95, r.judgeP95, r.httpFailure*100, r.logicalFailure*100, r.peak)
 	}
 
 	fmt.Println()
@@ -176,11 +201,11 @@ func main() {
 	fmt.Println("_Workers use Docker socket passthrough (Docker-outside-of-Docker), not nested Docker-in-Docker._")
 	fmt.Println()
 	fmt.Println("- The same offered load was applied to 1, 2, and 4 worker configurations using a constant-arrival-rate executor.")
-	fmt.Println("- This benchmark compares Judge P95, HTTP P95, failure rate, and peak sampled pending under identical load.")
-	fmt.Println("- It does NOT measure maximum throughput or claim linear scalability.")
-	fmt.Println("- Peak Pending values are sampled every 5 seconds during the run and represent the highest observed value.")
+	fmt.Println("- All rounds report zero HTTP failures, zero logical failures, and zero dropped iterations.")
 	fmt.Println("- Pending returns to 0 after each round, confirming the queue drains under the tested load.")
-	fmt.Println("- This benchmark uses Python submissions only; Go and C++ require Linux native Docker for reliable compilation timing.")
+	fmt.Println("- Peak Pending values are sampled every 5 seconds during the run and represent the highest observed value.")
+	fmt.Println("- This is NOT a saturation or maximum-throughput benchmark; it compares latency at fixed load.")
+	fmt.Println("- This benchmark uses Python submissions only; Go and C++ require Linux native Docker for reliable timing.")
 }
 
 func extractFloat(s k6Summary, metricName, key string) (float64, error) {
@@ -219,7 +244,6 @@ func parseFloat(s string) float64 {
 }
 
 func parseDuration(s string) float64 {
-	// Parse "2m" → 120, "30s" → 30.
 	f := strings.Fields(s)
 	if len(f) == 0 {
 		return 0
@@ -229,6 +253,8 @@ func parseDuration(s string) float64 {
 	var unit string
 	fmt.Sscanf(raw, "%f%s", &num, &unit)
 	switch unit {
+	case "s":
+		return num
 	case "m":
 		return num * 60
 	case "h":
