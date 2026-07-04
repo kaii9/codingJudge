@@ -1,12 +1,12 @@
 # Fixed-Load Worker Scaling Benchmark
 
-**Date:** 2026-07-03T13:48:33Z
+**Date:** 2026-07-04T07:50:56Z
 
 ## Environment
 
 | Key | Value |
 | --- | --- |
-| Git commit | 1a51556 |
+| Git commit | fb3b16d |
 | OS | Darwin |
 | Architecture | arm64 |
 | Logical CPUs | 8 |
@@ -25,11 +25,11 @@
 
 ## Results
 
-| Workers | Offered rate | Created/s | Accepted/s | HTTP rate | HTTP P95 | Judge P95 | Failure rate | Peak pending (sampled) |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| 1 | 1.00/s | 1.00/s | 1.00/s | 8.83/s | 4.85ms | 739.40ms | 0.0000% | 1 |
-| 2 | 1.00/s | 1.00/s | 0.99/s | 10.00/s | 7.96ms | 1587.00ms | 0.0000% | 2 |
-| 4 | 1.00/s | 1.00/s | 1.00/s | 9.79/s | 9.97ms | 1474.00ms | 0.0000% | 2 |
+| Workers | Offered rate | Created/s | Accepted/s | HTTP rate | HTTP P95 | Judge P95 | HTTP failure | Logical failure | Peak pending (sampled) |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 1 | 1.00/s | 1.00/s | 1.00/s | 9.89/s | 6.05ms | 1458.65ms | 0.0000% | 0.0000% | 1 |
+| 2 | 1.00/s | 1.00/s | 1.00/s | 8.88/s | 5.09ms | 829.00ms | 0.0000% | 0.0000% | 1 |
+| 4 | 1.00/s | 1.00/s | 1.00/s | 8.92/s | 4.85ms | 775.40ms | 0.0000% | 0.0000% | 1 |
 
 ## Interpretation
 
@@ -38,8 +38,8 @@ _Results are from a local Docker Compose environment and are not production capa
 _Workers use Docker socket passthrough (Docker-outside-of-Docker), not nested Docker-in-Docker._
 
 - The same offered load was applied to 1, 2, and 4 worker configurations using a constant-arrival-rate executor.
-- This benchmark compares Judge P95, HTTP P95, failure rate, and peak sampled pending under identical load.
-- It does NOT measure maximum throughput or claim linear scalability.
-- Peak Pending values are sampled every 5 seconds during the run and represent the highest observed value.
+- All rounds report zero HTTP failures, zero logical failures, and zero dropped iterations.
 - Pending returns to 0 after each round, confirming the queue drains under the tested load.
-- This benchmark uses Python submissions only; Go and C++ require Linux native Docker for reliable compilation timing.
+- Peak Pending values are sampled every 5 seconds during the run and represent the highest observed value.
+- This is NOT a saturation or maximum-throughput benchmark; it compares latency at fixed load.
+- This benchmark uses Python submissions only; Go and C++ require Linux native Docker for reliable timing.

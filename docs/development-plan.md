@@ -171,7 +171,7 @@ Acceptance:
 
 ## Phase 8: Observability and Load Testing
 
-Status: implemented. Fixed-load benchmark: 1→4 workers scales accepted/s from 1.33→3.34, Judge P95 from 5530→2062ms.
+Status: implemented. Fixed-load benchmark (1 req/s, 120+ iterations): all rounds pass strict validation with 0 HTTP failures, 0 logical failures, and 0 dropped iterations. Pending returns to 0 after each round.
 
 Goal: add application-level Prometheus metrics, a provisioned Grafana dashboard, and reproducible k6 benchmarks comparing one, two, and four judge workers.
 
@@ -226,7 +226,7 @@ Reason:
 - Collection, title/tag and difficulty filters keep the larger catalog navigable.
 - Playwright verifies browser submissions and responsive desktop/mobile layouts.
 - Prometheus and Grafana provide real-time observability with a pre-provisioned dashboard.
-- k6 workloads and automated scaling benchmarks measure 45→53 req/s throughput with P95 judge latency improving from 2356ms (1 worker) to 1042ms (4 workers).
+- k6 workloads compare latency, failures, and sampled Pending under identical fixed load (not maximum throughput). All rounds pass strict validation.
 
 Not yet implemented:
 

@@ -18,7 +18,7 @@ Frontend: Next.js + React + Monaco Editor
 Deploy: Docker Compose
 CI/CD: GitHub Actions
 Docs: OpenAPI
-Observability: slog; Prometheus metrics planned
+Observability: slog + Prometheus + Grafana
 ```
 
 单元测试和只读写 API 演示可以使用内存 store；跨进程判题要求同时设置 `DATABASE_URL` 和 `REDIS_ADDR`。只配置其中一项会启动失败，避免产生不完整的持久化链路。
@@ -300,7 +300,7 @@ docs/screenshots/     desktop and mobile product screenshots
 3. 已完成：Next.js + Monaco 分栏工作台、状态轮询、提交历史、响应式布局和 Playwright E2E。
 4. 已完成：Transactional Outbox、多 worker 直接消费、PostgreSQL 租约、fencing token 和故障接管。
 5. 已完成：20 道精选题库、标准化难度/标签、每题至少 6 个隐藏用例和前端组合筛选。
-6. 已完成：Prometheus 应用指标、Grafana 预配 Dashboard、k6 fixed-load 基准（1/2/4 worker，constant-arrival-rate 1 req/s，0% 失败率，Pending 归零）。
+6. 已完成：Prometheus 应用指标、Grafana 预配 Dashboard、k6 固定负载基准——所有轮次 HTTP 失败 0、逻辑失败 0、掉迭代 0。
 
 ## Resume Highlights
 
