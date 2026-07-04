@@ -50,7 +50,18 @@ info "recording machine metadata..."
   echo "judge_images: ${JUDGE_IMAGES}"
 } > "$RESULTS/meta.txt"
 
-REQUIRED_METRICS="http_reqs http_req_duration http_req_failed submissions_created submissions_accepted iterations"
+# Explicit duration parsing: only s, m, h are supported.
+parse_duration_secs() {
+  local raw="$1"
+  local num="${raw%[smh]}"
+  local unit="${raw##*[0-9]}"
+  case "$unit" in
+    s) echo "$num" ;;
+    m) echo $((num * 60)) ;;
+    h) echo $((num * 3600)) ;;
+    *) die "unsupported duration format: $raw (use Ns, Nm, or Nh)" ;;
+  esac
+}
 
 SCENARIO="${K6_SCENARIO:-submissions.js}"
 CJ_RATE="${CJ_RATE:-1}"
@@ -59,8 +70,18 @@ CJ_MAX_VUS="${CJ_MAX_VUS:-30}"
 CJ_DURATION="${CJ_DURATION:-2m}"
 CJ_TIMEOUT="${CJ_TIMEOUT:-120}"
 
-# Use non-reserved k6 env var names so the constant-arrival-rate scenario is not overridden.
 K6_ARGS="--env CJ_RATE=$CJ_RATE --env CJ_PREALLOCATED_VUS=$CJ_PREALLOCATED_VUS --env CJ_MAX_VUS=$CJ_MAX_VUS --env CJ_DURATION=$CJ_DURATION --env CJ_JUDGE_TIMEOUT_SECONDS=$CJ_TIMEOUT"
+
+DURATION_SECS=$(parse_duration_secs "$CJ_DURATION")
+EXPECTED=$((CJ_RATE * DURATION_SECS))
+# Compute tolerance: max(2, floor(expected * 0.02))
+TOLERANCE=$(echo "if (2 > $EXPECTED * 0.02) { 2 } else { scale=0; $EXPECTED * 0.02 / 1 }" | bc 2>/dev/null || echo 2)
+# Ensure tolerance is a positive integer.
+case "$TOLERANCE" in ''|0|*[!0-9]*) TOLERANCE=2 ;; esac
+EXPECTED_MIN=$((EXPECTED - TOLERANCE))
+EXPECTED_MAX=$((EXPECTED + TOLERANCE))
+
+REQUIRED_METRICS="http_reqs http_req_duration http_req_failed submissions_created submissions_accepted iterations logical_failures"
 
 {
   echo "offered_rate: ${CJ_RATE} req/s"
@@ -72,36 +93,37 @@ K6_ARGS="--env CJ_RATE=$CJ_RATE --env CJ_PREALLOCATED_VUS=$CJ_PREALLOCATED_VUS -
   echo "worker_concurrency: 1"
 } >> "$RESULTS/meta.txt"
 
-# Pre-compute expected submission count range.
-# rate * duration_in_seconds * 1.3 → upper bound, 0.5 → lower bound
-DURATION_SECS=$(echo "$CJ_DURATION" | sed 's/m$/*60/' | bc)
-EXPECTED_MIN=$(echo "$CJ_RATE * $DURATION_SECS * 0.5 / 1" | bc 2>/dev/null || echo 30)
-EXPECTED_MAX=$(echo "$CJ_RATE * $DURATION_SECS * 1.5 / 1" | bc 2>/dev/null || echo 360)
-
 validate_summary() {
-  local summary="$1" label="$2"
+  local summary="$1" label="$2" log="$3"
   [ ! -s "$summary" ] && die "$label: summary file missing or empty: $summary"
+  [ ! -s "$log" ]    && die "$label: k6 log missing or empty: $log"
+
+  # Require constant_load executor; reject scenario override.
+  grep -qF 'constant_load' "$log" || die "$label: log does not mention constant_load executor"
+  grep -qF 'overrode scenarios configuration entirely' "$log" && die "$label: k6 env overrode scenario configuration"
+
   for metric in $REQUIRED_METRICS; do
     jq -e ".metrics[\"$metric\"]" "$summary" >/dev/null 2>&1 || die "$label: required metric '$metric' missing from $summary"
   done
-  local dropped=$(jq -r '.metrics.dropped_iterations.count // 0' "$summary" 2>/dev/null)
-  if [ "${dropped:-0}" != "0" ] && [ "${dropped:-0}" != "null" ]; then
-    die "$label: dropped iterations = $dropped, must be 0"
-  fi
+
   local created=$(jq -r '.metrics.submissions_created.count // 0' "$summary" 2>/dev/null)
   local iterations=$(jq -r '.metrics.iterations.count // 0' "$summary" 2>/dev/null)
   local accepted=$(jq -r '.metrics.submissions_accepted.count // 0' "$summary" 2>/dev/null)
-  if [ "$created" != "$iterations" ]; then
-    die "$label: submissions_created ($created) != iterations ($iterations)"
-  fi
-  local min_accepted=$(echo "$created * 0.95 / 1" | bc 2>/dev/null || echo 0)
-  if [ "$accepted" -lt "$min_accepted" ]; then
-    die "$label: accepted ($accepted) < 95% of created ($created)"
-  fi
+  local dropped=$(jq -r '.metrics.dropped_iterations.count // 0' "$summary" 2>/dev/null)
+  local httpFail=$(jq -r '.metrics.http_req_failed.value // 0' "$summary" 2>/dev/null)
+  local logicalFail=$(jq -r '.metrics.logical_failures.value // 0' "$summary" 2>/dev/null)
+
+  [ "$created" = "$iterations" ] || die "$label: created ($created) != iterations ($iterations)"
+  [ "$accepted" = "$created" ]  || die "$label: accepted ($accepted) != created ($created)"
+  [ "$dropped" = "0" ]          || die "$label: dropped_iterations=$dropped, must be 0"
+  [ "$httpFail" = "0" ]         || die "$label: http_req_failed=$httpFail, must be 0"
+  [ "$logicalFail" = "0" ]      || die "$label: logical_failures=$logicalFail, must be 0"
+
   if [ "$created" -lt "$EXPECTED_MIN" ] || [ "$created" -gt "$EXPECTED_MAX" ]; then
-    die "$label: created=$created outside expected range [$EXPECTED_MIN, $EXPECTED_MAX]"
+    die "$label: created=$created outside [$EXPECTED_MIN, $EXPECTED_MAX] (expected=$EXPECTED)"
   fi
-  info "  summary valid: $label (created=$created, accepted=$accepted, iterations=$iterations, dropped=0)"
+
+  info "  summary valid: $label (created=$created, accepted=$accepted, dropped=0, http_fail=0, logical_fail=0)"
 }
 
 for workers in 1 2 4; do
@@ -123,9 +145,7 @@ for workers in 1 2 4; do
     fi
     sleep 2
   done
-  if [ "$found" -ne 1 ]; then
-    die "worker target count did not reach $workers within 60s"
-  fi
+  [ "$found" -eq 1 ] || die "worker target count did not reach $workers within 60s"
   info "  $workers worker target(s) confirmed"
 
   info "starting pending capture..."
@@ -142,19 +162,18 @@ for workers in 1 2 4; do
 
   info "running k6 scenario: $SCENARIO"
   SUMMARY="$RESULTS/k6-worker-${workers}.json"
+  K6_LOG="$RESULTS/k6-worker-${workers}.log"
   set +e
-  docker compose --profile loadtest run --rm k6 k6 run "/scripts/$SCENARIO" $K6_ARGS --summary-export="/results/k6-worker-${workers}.json" 2>&1
-  k6_exit=$?
+  docker compose --profile loadtest run --rm k6 k6 run "/scripts/$SCENARIO" $K6_ARGS --summary-export="/results/k6-worker-${workers}.json" 2>&1 | tee "$K6_LOG"
+  k6_exit=${PIPESTATUS[0]}
   set -e
 
   kill $CAPTURE_PID 2>/dev/null || true
   wait $CAPTURE_PID 2>/dev/null || true
 
-  if [ $k6_exit -ne 0 ]; then
-    die "k6 returned non-zero (threshold failures), exit=$k6_exit"
-  fi
+  [ $k6_exit -eq 0 ] || die "k6 returned non-zero (threshold failures), exit=$k6_exit"
 
-  validate_summary "$SUMMARY" "worker-$workers"
+  validate_summary "$SUMMARY" "worker-$workers" "$K6_LOG"
 
   PEAK=$(awk -F',' 'NR>1 {if($2+0>max) max=$2+0} END{print max+0}' "$PENDING_LOG")
   echo "peak_pending_w${workers}: $PEAK" >> "$RESULTS/meta.txt"
@@ -169,35 +188,25 @@ for workers in 1 2 4; do
     fi
     sleep 2
   done
-  if [ "$drained" -ne 1 ]; then
-    die "Redis Pending did not reach 0 within 120s (got ${pending:-?})"
-  fi
+  [ "$drained" -eq 1 ] || die "Redis Pending did not reach 0 within 120s (got ${pending:-?})"
   info "  Pending drained to 0"
 done
 
 info "final Redis Pending check..."
 FINAL_PENDING=$(docker compose exec -T redis redis-cli XPENDING judge:submissions judge-workers 2>/dev/null | awk '{print $1}' || echo -1)
-if [ "${FINAL_PENDING:-0}" != "0" ]; then
-  die "final Redis Pending is $FINAL_PENDING, expected 0"
-fi
+[ "${FINAL_PENDING:-0}" = "0" ] || die "final Redis Pending is $FINAL_PENDING, expected 0"
 info "  Redis Pending = 0 (confirmed)"
 
 info "rendering report..."
 for i in 1 2 4; do
-  SUMMARY="$RESULTS/k6-worker-${i}.json"
-  if [ ! -s "$SUMMARY" ]; then
-    die "summary file missing before render: $SUMMARY"
-  fi
+  [ -s "$RESULTS/k6-worker-${i}.json" ] || die "summary file missing before render: $RESULTS/k6-worker-${i}.json"
 done
 rm -f "$REPORT_TMP"
 go run "$BENCH_DIR/render-benchmark-report.go" "$RESULTS/meta.txt" \
   "$RESULTS/k6-worker-1.json" \
   "$RESULTS/k6-worker-2.json" \
   "$RESULTS/k6-worker-4.json" > "$REPORT_TMP"
-
-if [ ! -s "$REPORT_TMP" ]; then
-  die "report file is empty"
-fi
+[ -s "$REPORT_TMP" ] || die "report file is empty"
 mv "$REPORT_TMP" "$REPORT"
 
 info "benchmark complete. Report: $REPORT"
