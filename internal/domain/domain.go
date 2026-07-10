@@ -86,6 +86,7 @@ type TestCase struct {
 
 type Submission struct {
 	ID        string           `json:"id"`
+	UserID    string           `json:"userId,omitempty"`
 	ProblemID string           `json:"problemId"`
 	Language  Language         `json:"language"`
 	Code      string           `json:"code,omitempty"`
@@ -93,6 +94,28 @@ type Submission struct {
 	Result    *JudgeResult     `json:"result,omitempty"`
 	CreatedAt time.Time        `json:"createdAt"`
 	UpdatedAt time.Time        `json:"updatedAt"`
+}
+
+type User struct {
+	ID        string    `json:"id"`
+	Username  string    `json:"username"`
+	CreatedAt time.Time `json:"createdAt"`
+}
+
+type Session struct {
+	TokenHash string    `json:"-"`
+	UserID    string    `json:"userId"`
+	ExpiresAt time.Time `json:"expiresAt"`
+	CreatedAt time.Time `json:"createdAt"`
+}
+
+type LeaderboardEntry struct {
+	Rank                int       `json:"rank"`
+	UserID              string    `json:"userId"`
+	Username            string    `json:"username"`
+	Solved              int       `json:"solved"`
+	AcceptedSubmissions int       `json:"acceptedSubmissions"`
+	LastAcceptedAt      time.Time `json:"lastAcceptedAt"`
 }
 
 type JudgeResult struct {

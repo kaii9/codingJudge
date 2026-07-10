@@ -28,6 +28,7 @@ export interface JudgeResult {
 
 export interface Submission {
   id: string;
+  userId?: string;
   problemId: string;
   language: Language;
   status: SubmissionStatus;
@@ -40,4 +41,24 @@ export interface CreateSubmissionInput {
   problemId: string;
   language: Language;
   code: string;
+}
+
+export interface User {
+  id: string;
+  username: string;
+  createdAt: string;
+}
+
+export interface AuthInput {
+  username: string;
+  password: string;
+}
+
+export interface LeaderboardEntry {
+  rank: number;
+  userId: string;
+  username: string;
+  solved: number;
+  acceptedSubmissions: number;
+  lastAcceptedAt: string;
 }

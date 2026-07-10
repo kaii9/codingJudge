@@ -9,7 +9,9 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
+	"github.com/kai/codingjudge/internal/auth"
 	"github.com/kai/codingjudge/internal/domain"
 	"github.com/kai/codingjudge/internal/httpapi"
 	"github.com/kai/codingjudge/internal/store"
@@ -17,7 +19,7 @@ import (
 
 // fakeSubmissionMetrics records SubmissionCreated calls for testing.
 type fakeSubmissionMetrics struct {
-	mu     sync.Mutex
+	mu        sync.Mutex
 	languages []string
 }
 
@@ -83,9 +85,11 @@ func TestCreateSubmissionPersistsQueuedSubmission(t *testing.T) {
 
 	st := store.NewMemoryStore(testProblems())
 	server := httpapi.NewServer(st)
+	cookie := registerTestUser(t, server, "kai")
 
 	payload := []byte(`{"problemId":"sum","language":"go","code":"package main\nfunc main(){}"}`)
 	req := httptest.NewRequest(http.MethodPost, "/submissions", bytes.NewReader(payload))
+	req.AddCookie(cookie)
 	rec := httptest.NewRecorder()
 
 	server.ServeHTTP(rec, req)
@@ -100,10 +104,31 @@ func TestCreateSubmissionPersistsQueuedSubmission(t *testing.T) {
 	if created.ID == "" || created.Status != domain.StatusQueued {
 		t.Fatalf("created submission = %+v", created)
 	}
+	if created.UserID == "" {
+		t.Fatalf("created submission should include user id: %+v", created)
+	}
 
 	stored, ok, err := st.GetSubmission(context.Background(), created.ID)
 	if err != nil || !ok || stored.Status != domain.StatusQueued {
 		t.Fatalf("stored submission = %+v, %v, %v", stored, ok, err)
+	}
+	if stored.UserID != created.UserID {
+		t.Fatalf("stored user id = %q, want %q", stored.UserID, created.UserID)
+	}
+}
+
+func TestCreateSubmissionRequiresLogin(t *testing.T) {
+	t.Parallel()
+
+	server := newTestServer()
+	payload := []byte(`{"problemId":"sum","language":"go","code":"package main\nfunc main(){}"}`)
+	req := httptest.NewRequest(http.MethodPost, "/submissions", bytes.NewReader(payload))
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusUnauthorized)
 	}
 }
 
@@ -113,6 +138,7 @@ func TestCreateSubmissionRejectsOversizedCode(t *testing.T) {
 	server := newTestServer()
 	payload := `{"problemId":"sum","language":"go","code":"` + strings.Repeat("x", httpapi.MaxCodeBytes+1) + `"}`
 	req := httptest.NewRequest(http.MethodPost, "/submissions", strings.NewReader(payload))
+	req.AddCookie(registerTestUser(t, server, "kai"))
 	rec := httptest.NewRecorder()
 
 	server.ServeHTTP(rec, req)
@@ -134,6 +160,7 @@ func TestCreateSubmissionReturnsStructuredError(t *testing.T) {
 
 	server := newTestServer()
 	req := httptest.NewRequest(http.MethodPost, "/submissions", strings.NewReader(`{"problemId":"sum"}`))
+	req.AddCookie(registerTestUser(t, server, "kai"))
 	rec := httptest.NewRecorder()
 
 	server.ServeHTTP(rec, req)
@@ -154,7 +181,12 @@ func TestGetSubmissionReturnsStoredSubmission(t *testing.T) {
 	t.Parallel()
 
 	st := store.NewMemoryStore(testProblems())
+	user, err := st.CreateUser(context.Background(), "kai", "hash")
+	if err != nil {
+		t.Fatalf("CreateUser returned error: %v", err)
+	}
 	sub, err := st.CreateSubmission(context.Background(), domain.Submission{
+		UserID:    user.ID,
 		ProblemID: "sum",
 		Language:  domain.LanguageGo,
 		Code:      "code",
@@ -163,8 +195,10 @@ func TestGetSubmissionReturnsStoredSubmission(t *testing.T) {
 		t.Fatalf("CreateSubmission returned error: %v", err)
 	}
 	server := httpapi.NewServer(st)
+	cookie := registerExistingUserSession(t, st, user.ID)
 
 	req := httptest.NewRequest(http.MethodGet, "/submissions/"+sub.ID, nil)
+	req.AddCookie(cookie)
 	rec := httptest.NewRecorder()
 
 	server.ServeHTTP(rec, req)
@@ -185,7 +219,16 @@ func TestListSubmissionsReturnsHistoryWithoutCode(t *testing.T) {
 	t.Parallel()
 
 	st := store.NewMemoryStore(testProblems())
+	user, err := st.CreateUser(context.Background(), "kai", "hash")
+	if err != nil {
+		t.Fatalf("CreateUser returned error: %v", err)
+	}
+	other, err := st.CreateUser(context.Background(), "lin", "hash")
+	if err != nil {
+		t.Fatalf("CreateUser other returned error: %v", err)
+	}
 	first, err := st.CreateSubmission(context.Background(), domain.Submission{
+		UserID:    user.ID,
 		ProblemID: "sum",
 		Language:  domain.LanguageGo,
 		Code:      "first secret code",
@@ -194,6 +237,7 @@ func TestListSubmissionsReturnsHistoryWithoutCode(t *testing.T) {
 		t.Fatalf("CreateSubmission first returned error: %v", err)
 	}
 	second, err := st.CreateSubmission(context.Background(), domain.Submission{
+		UserID:    user.ID,
 		ProblemID: "sum",
 		Language:  domain.LanguageGo,
 		Code:      "second secret code",
@@ -201,9 +245,19 @@ func TestListSubmissionsReturnsHistoryWithoutCode(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateSubmission second returned error: %v", err)
 	}
+	if _, err := st.CreateSubmission(context.Background(), domain.Submission{
+		UserID:    other.ID,
+		ProblemID: "sum",
+		Language:  domain.LanguageGo,
+		Code:      "other secret code",
+	}); err != nil {
+		t.Fatalf("CreateSubmission other returned error: %v", err)
+	}
 	server := httpapi.NewServer(st)
+	cookie := registerExistingUserSession(t, st, user.ID)
 
 	req := httptest.NewRequest(http.MethodGet, "/submissions", nil)
+	req.AddCookie(cookie)
 	rec := httptest.NewRecorder()
 
 	server.ServeHTTP(rec, req)
@@ -230,9 +284,11 @@ func TestServerRecordsSubmissionLanguage(t *testing.T) {
 	st := store.NewMemoryStore(testProblems())
 	metrics := &fakeSubmissionMetrics{}
 	server := httpapi.NewServer(st, httpapi.WithSubmissionMetrics(metrics))
+	cookie := registerTestUser(t, server, "kai")
 
 	payload := []byte(`{"problemId":"sum","language":"go","code":"package main\nfunc main(){}"}`)
 	req := httptest.NewRequest(http.MethodPost, "/submissions", bytes.NewReader(payload))
+	req.AddCookie(cookie)
 	rec := httptest.NewRecorder()
 
 	server.ServeHTTP(rec, req)
@@ -256,9 +312,11 @@ func TestServerDoesNotRecordFailedSubmission(t *testing.T) {
 	st := store.NewMemoryStore(testProblems())
 	metrics := &fakeSubmissionMetrics{}
 	server := httpapi.NewServer(st, httpapi.WithSubmissionMetrics(metrics))
+	cookie := registerTestUser(t, server, "kai")
 
 	// Missing required fields — should return 400 without recording.
 	req := httptest.NewRequest(http.MethodPost, "/submissions", strings.NewReader(`{}`))
+	req.AddCookie(cookie)
 	rec := httptest.NewRecorder()
 
 	server.ServeHTTP(rec, req)
@@ -271,6 +329,116 @@ func TestServerDoesNotRecordFailedSubmission(t *testing.T) {
 	defer metrics.mu.Unlock()
 	if len(metrics.languages) != 0 {
 		t.Errorf("expected 0 submissions recorded for failed request, got %d: %v", len(metrics.languages), metrics.languages)
+	}
+}
+
+func TestAuthRegisterSetsCookieAndMeReturnsUser(t *testing.T) {
+	t.Parallel()
+
+	server := newTestServer()
+	cookie := registerTestUser(t, server, "Kai_01")
+	if !cookie.HttpOnly {
+		t.Fatal("session cookie should be HttpOnly")
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/auth/me", nil)
+	req.AddCookie(cookie)
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d, body: %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	var user domain.User
+	if err := json.NewDecoder(rec.Body).Decode(&user); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if user.ID == "" || user.Username != "Kai_01" {
+		t.Fatalf("user = %+v", user)
+	}
+}
+
+func TestAuthLoginRejectsWrongPassword(t *testing.T) {
+	t.Parallel()
+
+	server := newTestServer()
+	_ = registerTestUser(t, server, "kai")
+
+	req := httptest.NewRequest(http.MethodPost, "/auth/login", strings.NewReader(`{"username":"kai","password":"wrong-password"}`))
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusUnauthorized)
+	}
+}
+
+func TestAuthLogoutClearsSession(t *testing.T) {
+	t.Parallel()
+
+	server := newTestServer()
+	cookie := registerTestUser(t, server, "kai")
+
+	req := httptest.NewRequest(http.MethodPost, "/auth/logout", nil)
+	req.AddCookie(cookie)
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusNoContent)
+	}
+	cleared := rec.Result().Cookies()
+	if len(cleared) != 1 || cleared[0].MaxAge >= 0 {
+		t.Fatalf("logout cookie = %+v, want clearing cookie", cleared)
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/auth/me", nil)
+	req.AddCookie(cookie)
+	rec = httptest.NewRecorder()
+	server.ServeHTTP(rec, req)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("me after logout status = %d, want %d", rec.Code, http.StatusUnauthorized)
+	}
+}
+
+func TestLeaderboardReturnsAcceptedCounts(t *testing.T) {
+	t.Parallel()
+
+	st := store.NewMemoryStore(testProblems())
+	ctx := context.Background()
+	kai, err := st.CreateUser(ctx, "kai", "hash")
+	if err != nil {
+		t.Fatalf("CreateUser kai returned error: %v", err)
+	}
+	lin, err := st.CreateUser(ctx, "lin", "hash")
+	if err != nil {
+		t.Fatalf("CreateUser lin returned error: %v", err)
+	}
+	completeHTTPTestSubmission(t, st, domain.Submission{UserID: kai.ID, ProblemID: "sum", Language: domain.LanguageGo, Code: "ok"}, domain.StatusAccepted)
+	completeHTTPTestSubmission(t, st, domain.Submission{UserID: kai.ID, ProblemID: "sum", Language: domain.LanguageGo, Code: "ok again"}, domain.StatusAccepted)
+	completeHTTPTestSubmission(t, st, domain.Submission{UserID: lin.ID, ProblemID: "sum", Language: domain.LanguageGo, Code: "ok"}, domain.StatusAccepted)
+	server := httpapi.NewServer(st)
+
+	req := httptest.NewRequest(http.MethodGet, "/leaderboard", nil)
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d, body: %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	var entries []domain.LeaderboardEntry
+	if err := json.NewDecoder(rec.Body).Decode(&entries); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(entries) != 2 {
+		t.Fatalf("entry count = %d, want 2", len(entries))
+	}
+	if entries[0].Username != "kai" || entries[0].Solved != 1 || entries[0].AcceptedSubmissions != 2 {
+		t.Fatalf("first entry = %+v, want kai solved=1 accepted=2", entries[0])
 	}
 }
 
@@ -291,4 +459,51 @@ func testProblems() []domain.Problem {
 			{Input: "1 2\n", ExpectedOutput: "3\n"},
 		},
 	}}
+}
+
+func registerTestUser(t *testing.T, server http.Handler, username string) *http.Cookie {
+	t.Helper()
+
+	req := httptest.NewRequest(http.MethodPost, "/auth/register", strings.NewReader(`{"username":"`+username+`","password":"correct-password"}`))
+	rec := httptest.NewRecorder()
+	server.ServeHTTP(rec, req)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("register status = %d, want %d, body: %s", rec.Code, http.StatusCreated, rec.Body.String())
+	}
+	for _, cookie := range rec.Result().Cookies() {
+		if cookie.Name == "gojudge_session" {
+			return cookie
+		}
+	}
+	t.Fatalf("session cookie not set: %+v", rec.Result().Cookies())
+	return nil
+}
+
+func registerExistingUserSession(t *testing.T, st *store.MemoryStore, userID string) *http.Cookie {
+	t.Helper()
+
+	token := "test-token-" + userID
+	_, err := st.CreateSession(context.Background(), userID, auth.HashSessionToken(token), time.Now().UTC().Add(time.Hour))
+	if err != nil {
+		t.Fatalf("CreateSession returned error: %v", err)
+	}
+	return &http.Cookie{Name: "gojudge_session", Value: token}
+}
+
+func completeHTTPTestSubmission(t *testing.T, st *store.MemoryStore, sub domain.Submission, status domain.SubmissionStatus) {
+	t.Helper()
+
+	created, err := st.CreateSubmission(context.Background(), sub)
+	if err != nil {
+		t.Fatalf("CreateSubmission returned error: %v", err)
+	}
+	now := time.Now().UTC()
+	token := "token-" + created.ID
+	claim, err := st.ClaimSubmission(context.Background(), created.ID, "worker", token, "1-0", now, time.Minute)
+	if err != nil || claim.State != domain.ClaimAcquired {
+		t.Fatalf("ClaimSubmission = %+v, %v", claim, err)
+	}
+	if ok, err := st.CompleteSubmission(context.Background(), created.ID, token, now.Add(time.Second), domain.JudgeResult{Status: status}); err != nil || !ok {
+		t.Fatalf("CompleteSubmission = %v, %v", ok, err)
+	}
 }

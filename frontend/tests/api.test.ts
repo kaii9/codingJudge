@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ApiError, getProblems } from "@/lib/api";
+import { ApiError, getLeaderboard, getProblems } from "@/lib/api";
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -31,5 +31,25 @@ describe("getProblems", () => {
     await expect(getProblems()).rejects.toEqual(
       new ApiError(200, "invalid_response", "API returned an invalid JSON response"),
     );
+  });
+});
+
+describe("getLeaderboard", () => {
+  it("returns leaderboard entries", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(Response.json([
+      {
+        rank: 1,
+        userId: "user-1",
+        username: "kai",
+        solved: 3,
+        acceptedSubmissions: 4,
+        lastAcceptedAt: "2026-07-11T00:00:00Z",
+      },
+    ])));
+
+    await expect(getLeaderboard()).resolves.toMatchObject([
+      { rank: 1, username: "kai", solved: 3, acceptedSubmissions: 4 },
+    ]);
+    expect(fetch).toHaveBeenCalledWith("/api/leaderboard", undefined);
   });
 });

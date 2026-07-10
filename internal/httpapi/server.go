@@ -6,14 +6,21 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"regexp"
 	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/kai/codingjudge/internal/auth"
 	"github.com/kai/codingjudge/internal/domain"
+	"github.com/kai/codingjudge/internal/store"
 )
 
 const MaxCodeBytes = 64 * 1024
+const sessionCookieName = "gojudge_session"
+const sessionTTL = 7 * 24 * time.Hour
+
+var usernamePattern = regexp.MustCompile(`^[A-Za-z0-9_-]{3,32}$`)
 
 type ProblemStore interface {
 	ListProblems(context.Context) ([]domain.Problem, error)
@@ -21,6 +28,15 @@ type ProblemStore interface {
 	CreateSubmission(context.Context, domain.Submission) (domain.Submission, error)
 	ListSubmissions(context.Context) ([]domain.Submission, error)
 	GetSubmission(context.Context, string) (domain.Submission, bool, error)
+	CreateUser(context.Context, string, string) (domain.User, error)
+	GetUserByUsername(context.Context, string) (domain.User, bool, error)
+	GetPasswordHashByUsername(context.Context, string) (string, domain.User, bool, error)
+	CreateSession(context.Context, string, string, time.Time) (domain.Session, error)
+	GetUserBySessionTokenHash(context.Context, string, time.Time) (domain.User, bool, error)
+	DeleteSession(context.Context, string) error
+	ListSubmissionsByUser(context.Context, string) ([]domain.Submission, error)
+	GetSubmissionForUser(context.Context, string, string) (domain.Submission, bool, error)
+	ListLeaderboard(context.Context, int) ([]domain.LeaderboardEntry, error)
 }
 
 type Server struct {
@@ -83,11 +99,16 @@ func NewServer(store ProblemStore, options ...Option) *Server {
 			s.metricsHandler.ServeHTTP(w, r)
 		})
 	}
+	r.Post("/auth/register", s.register)
+	r.Post("/auth/login", s.login)
+	r.Post("/auth/logout", s.logout)
+	r.Get("/auth/me", s.me)
 	r.Get("/problems", s.listProblems)
 	r.Get("/problems/{id}", s.getProblem)
 	r.Post("/submissions", s.createSubmission)
 	r.Get("/submissions", s.listSubmissions)
 	r.Get("/submissions/{id}", s.getSubmission)
+	r.Get("/leaderboard", s.listLeaderboard)
 	r.NotFound(func(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "not found")
 	})
@@ -97,6 +118,87 @@ func NewServer(store ProblemStore, options ...Option) *Server {
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.router.ServeHTTP(w, r)
+}
+
+func (s *Server) register(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Username string `json:"username"`
+		Password string `json:"password"`
+	}
+	if !decodeAuthRequest(w, r, &req) {
+		return
+	}
+	if !validUsername(req.Username) || !validPassword(req.Password) {
+		writeErrorCode(w, http.StatusBadRequest, "invalid_request", "username or password is invalid")
+		return
+	}
+	passwordHash, err := auth.HashPassword(req.Password)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "hash password")
+		return
+	}
+	user, err := s.store.CreateUser(r.Context(), strings.TrimSpace(req.Username), passwordHash)
+	if err != nil {
+		if errors.Is(err, store.ErrConflict) {
+			writeErrorCode(w, http.StatusConflict, "conflict", "username already exists")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "create user")
+		return
+	}
+	if err := s.issueSession(w, r, user.ID); err != nil {
+		writeError(w, http.StatusInternalServerError, "create session")
+		return
+	}
+	writeJSON(w, http.StatusCreated, user)
+}
+
+func (s *Server) login(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Username string `json:"username"`
+		Password string `json:"password"`
+	}
+	if !decodeAuthRequest(w, r, &req) {
+		return
+	}
+	passwordHash, user, ok, err := s.store.GetPasswordHashByUsername(r.Context(), req.Username)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "get user")
+		return
+	}
+	if !ok || !auth.CheckPassword(passwordHash, req.Password) {
+		writeErrorCode(w, http.StatusUnauthorized, "unauthenticated", "invalid username or password")
+		return
+	}
+	if err := s.issueSession(w, r, user.ID); err != nil {
+		writeError(w, http.StatusInternalServerError, "create session")
+		return
+	}
+	writeJSON(w, http.StatusOK, user)
+}
+
+func (s *Server) logout(w http.ResponseWriter, r *http.Request) {
+	if cookie, err := r.Cookie(sessionCookieName); err == nil && cookie.Value != "" {
+		if err := s.store.DeleteSession(r.Context(), auth.HashSessionToken(cookie.Value)); err != nil {
+			writeError(w, http.StatusInternalServerError, "delete session")
+			return
+		}
+	}
+	clearSessionCookie(w)
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) me(w http.ResponseWriter, r *http.Request) {
+	user, ok, err := s.currentUser(r)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "get current user")
+		return
+	}
+	if !ok {
+		writeErrorCode(w, http.StatusUnauthorized, "unauthenticated", "login required")
+		return
+	}
+	writeJSON(w, http.StatusOK, user)
 }
 
 func (s *Server) listProblems(w http.ResponseWriter, r *http.Request) {
@@ -131,6 +233,16 @@ func (s *Server) getProblem(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) createSubmission(w http.ResponseWriter, r *http.Request) {
+	user, ok, err := s.currentUser(r)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "get current user")
+		return
+	}
+	if !ok {
+		writeErrorCode(w, http.StatusUnauthorized, "unauthenticated", "login required")
+		return
+	}
+
 	r.Body = http.MaxBytesReader(w, r.Body, MaxCodeBytes+1024)
 	var req struct {
 		ProblemID string          `json:"problemId"`
@@ -166,6 +278,7 @@ func (s *Server) createSubmission(w http.ResponseWriter, r *http.Request) {
 	}
 
 	sub, err := s.store.CreateSubmission(r.Context(), domain.Submission{
+		UserID:    user.ID,
 		ProblemID: req.ProblemID,
 		Language:  req.Language,
 		Code:      req.Code,
@@ -182,7 +295,16 @@ func (s *Server) createSubmission(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) listSubmissions(w http.ResponseWriter, r *http.Request) {
-	submissions, err := s.store.ListSubmissions(r.Context())
+	user, ok, err := s.currentUser(r)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "get current user")
+		return
+	}
+	if !ok {
+		writeErrorCode(w, http.StatusUnauthorized, "unauthenticated", "login required")
+		return
+	}
+	submissions, err := s.store.ListSubmissionsByUser(r.Context(), user.ID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "list submissions")
 		return
@@ -199,7 +321,16 @@ func (s *Server) getSubmission(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "submission not found")
 		return
 	}
-	sub, ok, err := s.store.GetSubmission(r.Context(), id)
+	user, userOK, err := s.currentUser(r)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "get current user")
+		return
+	}
+	if !userOK {
+		writeErrorCode(w, http.StatusUnauthorized, "unauthenticated", "login required")
+		return
+	}
+	sub, ok, err := s.store.GetSubmissionForUser(r.Context(), id, user.ID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "get submission")
 		return
@@ -210,6 +341,72 @@ func (s *Server) getSubmission(w http.ResponseWriter, r *http.Request) {
 	}
 	sub.Code = ""
 	writeJSON(w, http.StatusOK, sub)
+}
+
+func (s *Server) listLeaderboard(w http.ResponseWriter, r *http.Request) {
+	entries, err := s.store.ListLeaderboard(r.Context(), 50)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "list leaderboard")
+		return
+	}
+	writeJSON(w, http.StatusOK, entries)
+}
+
+func decodeAuthRequest(w http.ResponseWriter, r *http.Request, req any) bool {
+	r.Body = http.MaxBytesReader(w, r.Body, 4096)
+	if err := json.NewDecoder(r.Body).Decode(req); err != nil {
+		writeErrorCode(w, http.StatusBadRequest, "invalid_json", "invalid json")
+		return false
+	}
+	return true
+}
+
+func validUsername(username string) bool {
+	return usernamePattern.MatchString(strings.TrimSpace(username))
+}
+
+func validPassword(password string) bool {
+	return len(password) >= 8 && len(password) <= 72
+}
+
+func (s *Server) currentUser(r *http.Request) (domain.User, bool, error) {
+	cookie, err := r.Cookie(sessionCookieName)
+	if err != nil || cookie.Value == "" {
+		return domain.User{}, false, nil
+	}
+	return s.store.GetUserBySessionTokenHash(r.Context(), auth.HashSessionToken(cookie.Value), time.Now().UTC())
+}
+
+func (s *Server) issueSession(w http.ResponseWriter, r *http.Request, userID string) error {
+	token, err := auth.NewSessionToken()
+	if err != nil {
+		return err
+	}
+	expiresAt := time.Now().UTC().Add(sessionTTL)
+	if _, err := s.store.CreateSession(r.Context(), userID, auth.HashSessionToken(token), expiresAt); err != nil {
+		return err
+	}
+	http.SetCookie(w, &http.Cookie{
+		Name:     sessionCookieName,
+		Value:    token,
+		Path:     "/",
+		Expires:  expiresAt,
+		MaxAge:   int(sessionTTL.Seconds()),
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
+	})
+	return nil
+}
+
+func clearSessionCookie(w http.ResponseWriter) {
+	http.SetCookie(w, &http.Cookie{
+		Name:     sessionCookieName,
+		Value:    "",
+		Path:     "/",
+		MaxAge:   -1,
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
+	})
 }
 
 func writeJSON(w http.ResponseWriter, status int, value any) {
@@ -238,6 +435,10 @@ func defaultErrorCode(status int) string {
 	switch status {
 	case http.StatusBadRequest:
 		return "invalid_request"
+	case http.StatusUnauthorized:
+		return "unauthenticated"
+	case http.StatusConflict:
+		return "conflict"
 	case http.StatusNotFound:
 		return "not_found"
 	case http.StatusServiceUnavailable:

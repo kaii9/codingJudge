@@ -4,6 +4,90 @@ info:
   version: 0.1.0
   description: MVP API for problem listing, code submission, and asynchronous judge results.
 paths:
+  /auth/register:
+    post:
+      summary: Register a user and create a session
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AuthRequest"
+      responses:
+        "201":
+          description: Registered user
+          headers:
+            Set-Cookie:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "400":
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          description: Username already exists
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /auth/login:
+    post:
+      summary: Login and create a session
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AuthRequest"
+      responses:
+        "200":
+          description: Logged-in user
+          headers:
+            Set-Cookie:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "401":
+          description: Invalid credentials
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /auth/logout:
+    post:
+      summary: Delete current session
+      security:
+        - cookieAuth: []
+      responses:
+        "204":
+          description: Session deleted
+  /auth/me:
+    get:
+      summary: Get current user
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Current user
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "401":
+          description: Login required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
   /healthz:
     get:
       summary: Health check
@@ -54,7 +138,9 @@ paths:
                 $ref: "#/components/schemas/Error"
   /submissions:
     get:
-      summary: List submission history
+      summary: List current user's submission history
+      security:
+        - cookieAuth: []
       responses:
         "200":
           description: Submission history ordered by latest update
@@ -66,6 +152,8 @@ paths:
                   $ref: "#/components/schemas/Submission"
     post:
       summary: Create a code submission
+      security:
+        - cookieAuth: []
       requestBody:
         required: true
         content:
@@ -91,9 +179,17 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "401":
+          description: Login required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
   /submissions/{id}:
     get:
-      summary: Get submission result
+      summary: Get current user's submission result
+      security:
+        - cookieAuth: []
       parameters:
         - name: id
           in: path
@@ -113,8 +209,86 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "401":
+          description: Login required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /leaderboard:
+    get:
+      summary: List accepted-submission leaderboard
+      responses:
+        "200":
+          description: Leaderboard ordered by solved count and latest accepted time
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/LeaderboardEntry"
 components:
+  securitySchemes:
+    cookieAuth:
+      type: apiKey
+      in: cookie
+      name: gojudge_session
   schemas:
+    AuthRequest:
+      type: object
+      required:
+        - username
+        - password
+      properties:
+        username:
+          type: string
+          minLength: 3
+          maxLength: 32
+          pattern: "^[A-Za-z0-9_-]{3,32}$"
+        password:
+          type: string
+          minLength: 8
+          maxLength: 72
+    User:
+      type: object
+      required:
+        - id
+        - username
+        - createdAt
+      properties:
+        id:
+          type: string
+        username:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+    LeaderboardEntry:
+      type: object
+      required:
+        - rank
+        - userId
+        - username
+        - solved
+        - acceptedSubmissions
+        - lastAcceptedAt
+      properties:
+        rank:
+          type: integer
+          minimum: 1
+        userId:
+          type: string
+        username:
+          type: string
+        solved:
+          type: integer
+          minimum: 0
+        acceptedSubmissions:
+          type: integer
+          minimum: 0
+        lastAcceptedAt:
+          type: string
+          format: date-time
     CreateSubmissionRequest:
       type: object
       required:
@@ -145,6 +319,8 @@ components:
         - updatedAt
       properties:
         id:
+          type: string
+        userId:
           type: string
         problemId:
           type: string

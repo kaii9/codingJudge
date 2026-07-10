@@ -80,6 +80,35 @@ describe("API proxy", () => {
     await expect(response.json()).resolves.toEqual({ id: "sub-1" });
   });
 
+  it("forwards browser cookies and preserves upstream Set-Cookie", async () => {
+    vi.stubEnv("API_INTERNAL_URL", "http://api:8080");
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(Response.json(
+      { id: "user-1", username: "kai" },
+      {
+        status: 201,
+        headers: {
+          "Content-Type": "application/json",
+          "Set-Cookie": "gojudge_session=abc; Path=/; HttpOnly; SameSite=Lax",
+        },
+      },
+    ));
+    vi.stubGlobal("fetch", fetchMock);
+    const request = new Request("http://localhost/api/auth/me", {
+      headers: { Cookie: "gojudge_session=old" },
+    });
+
+    const response = await GET(request, {
+      params: Promise.resolve({ path: ["auth", "me"] }),
+    });
+
+    const [, init] = fetchMock.mock.calls[0];
+    expect(Array.from(new Headers(init?.headers).entries()))
+      .toEqual([["cookie", "gojudge_session=old"]]);
+    expect(response.status).toBe(201);
+    expect(response.headers.get("set-cookie"))
+      .toBe("gojudge_session=abc; Path=/; HttpOnly; SameSite=Lax");
+  });
+
   it("returns structured JSON when API_INTERNAL_URL is missing", async () => {
     vi.stubEnv("API_INTERNAL_URL", "");
     const fetchMock = vi.fn<typeof fetch>();

@@ -70,7 +70,7 @@ func (s *PostgresStore) ClaimSubmission(ctx context.Context, id, workerID, token
 	defer tx.Rollback(ctx)
 
 	row := tx.QueryRow(ctx, `
-		SELECT id, problem_id, language, code, status, stdout, stderr, exit_code,
+		SELECT id, COALESCE(user_id, ''), problem_id, language, code, status, stdout, stderr, exit_code,
 		       duration_ms, created_at, updated_at, judge_receipt, lease_expires_at, judge_attempts
 		FROM submissions
 		WHERE id = $1
@@ -169,7 +169,7 @@ func scanClaimSubmission(row submissionScanner) (domain.Submission, string, *tim
 	var expiresAt *time.Time
 	var attempts int
 	if err := row.Scan(
-		&sub.ID, &sub.ProblemID, &sub.Language, &sub.Code, &sub.Status,
+		&sub.ID, &sub.UserID, &sub.ProblemID, &sub.Language, &sub.Code, &sub.Status,
 		&stdout, &stderr, &exitCode, &duration, &sub.CreatedAt, &sub.UpdatedAt,
 		&receipt, &expiresAt, &attempts,
 	); err != nil {

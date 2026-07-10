@@ -101,8 +101,10 @@ export async function proxy(request: Request, context: ProxyContext): Promise<Re
 
   const { path } = await context.params;
   const contentType = request.headers.get("content-type");
+  const cookie = request.headers.get("cookie");
   const headers = new Headers();
   if (contentType) headers.set("content-type", contentType);
+  if (cookie) headers.set("cookie", cookie);
 
   const method = request.method.toUpperCase();
   let body: ArrayBuffer | undefined;
@@ -134,6 +136,8 @@ export async function proxy(request: Request, context: ProxyContext): Promise<Re
   const responseHeaders = new Headers();
   const responseContentType = response.headers.get("content-type");
   if (responseContentType) responseHeaders.set("content-type", responseContentType);
+  const setCookie = response.headers.get("set-cookie");
+  if (setCookie) responseHeaders.set("set-cookie", setCookie);
 
   return new Response(response.body, {
     status: response.status,

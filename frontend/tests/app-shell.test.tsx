@@ -1,4 +1,5 @@
 import { act, cleanup, render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { StrictMode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AppShell } from "@/components/app-shell";
@@ -45,6 +46,10 @@ describe("AppShell", () => {
       "href",
       "/submissions",
     );
+    expect(screen.getByRole("link", { name: "Leaderboard" })).toHaveAttribute(
+      "href",
+      "/leaderboard",
+    );
     expect(screen.getAllByRole("main")).toHaveLength(1);
     expect(screen.getByRole("main")).toHaveTextContent("Workbench content");
     expect(await screen.findByText("Online")).toBeVisible();
@@ -52,6 +57,43 @@ describe("AppShell", () => {
       "/api/healthz",
       expect.objectContaining({ signal: expect.any(AbortSignal) }),
     );
+  });
+
+  it("shows the current user and logs out", async () => {
+    const fetchMock = vi.fn().mockImplementation((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/healthz") {
+        return Promise.resolve(new Response('{"status":"ok"}', {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }));
+      }
+      if (url === "/api/auth/me") {
+        return Promise.resolve(Response.json({
+          id: "user-1",
+          username: "kai",
+          createdAt: "2026-07-11T00:00:00Z",
+        }));
+      }
+      if (url === "/api/auth/logout") {
+        return Promise.resolve(new Response(null, { status: 204 }));
+      }
+      return Promise.reject(new Error(`unexpected fetch ${url}`));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+
+    render(
+      <AppShell>
+        <main>Workbench content</main>
+      </AppShell>,
+    );
+
+    expect(await screen.findByText("kai")).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "Log out" }));
+
+    expect(fetchMock).toHaveBeenCalledWith("/api/auth/logout", { method: "POST" });
+    expect(await screen.findByRole("button", { name: "Log in" })).toBeVisible();
   });
 
   it("reports an unavailable service when the health request fails", async () => {
@@ -134,7 +176,10 @@ describe("AppShell", () => {
 
     vi.stubGlobal(
       "fetch",
-      vi.fn().mockImplementation((_input: RequestInfo | URL, init?: RequestInit) => {
+      vi.fn().mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+        if (String(input) === "/api/auth/me") {
+          return Promise.resolve(new Response(null, { status: 401 }));
+        }
         requestSignal = init?.signal ?? undefined;
         return new Promise<Response>(() => undefined);
       }),
@@ -197,15 +242,17 @@ describe("AppShell", () => {
     const firstResponse = deferred<Response>();
     const secondResponse = deferred<Response>();
     const requestSignals: AbortSignal[] = [];
+    const healthResponses = [firstResponse, secondResponse];
     const fetchMock = vi
       .fn()
-      .mockImplementationOnce((_input: RequestInfo | URL, init?: RequestInit) => {
+      .mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+        if (String(input) === "/api/auth/me") {
+          return Promise.resolve(new Response(null, { status: 401 }));
+        }
+        const response = healthResponses.shift();
+        if (!response) return Promise.reject(new Error("unexpected health request"));
         requestSignals.push(init?.signal as AbortSignal);
-        return firstResponse.promise;
-      })
-      .mockImplementationOnce((_input: RequestInfo | URL, init?: RequestInit) => {
-        requestSignals.push(init?.signal as AbortSignal);
-        return secondResponse.promise;
+        return response.promise;
       });
     vi.stubGlobal("fetch", fetchMock);
 
@@ -228,7 +275,7 @@ describe("AppShell", () => {
     });
 
     expect(screen.getByText("Online")).toBeVisible();
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls.filter(([input]) => String(input) === "/api/healthz")).toHaveLength(2);
     expect(requestSignals[0]?.aborted).toBe(true);
     expect(requestSignals[1]?.aborted).toBe(false);
 
@@ -254,7 +301,10 @@ describe("AppShell", () => {
 
     vi.stubGlobal(
       "fetch",
-      vi.fn().mockImplementation((_input: RequestInfo | URL, init?: RequestInit) => {
+      vi.fn().mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+        if (String(input) === "/api/auth/me") {
+          return Promise.resolve(new Response(null, { status: 401 }));
+        }
         requestSignal = init?.signal ?? undefined;
 
         return new Promise<Response>((_resolve, reject) => {

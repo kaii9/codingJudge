@@ -13,6 +13,7 @@ func TestScanSubmissionIncludesCodeForWorker(t *testing.T) {
 	now := time.Now().UTC()
 	row := fakeSubmissionRow{values: []any{
 		"sub-1",
+		"user-1",
 		"sum",
 		domain.LanguageGo,
 		"package main",

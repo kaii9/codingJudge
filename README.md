@@ -2,7 +2,7 @@
 
 GoJudge 是一个后端主导的在线代码评测系统。项目核心围绕一句话：Web 后端只是外壳，真正的难点是安全地运行不可信代码。
 
-当前仓库实现了完整 MVP 主链路：浏览题目、Monaco 编辑代码、提交 Go/C++/Python、异步判题、轮询结果和查看提交历史。题库包含 20 道原创面试高频题和 2 道 Starter 题，覆盖数组、哈希、滑动窗口、链表、树、图与动态规划。Compose 环境包含 Next.js 前端、Go API、独立 judge worker、PostgreSQL、Redis Streams 和 MinIO；Redis 消费支持成功后确认、三次重试、死信流和 pending 回收。无外部服务的本地测试默认使用内存 store 和内存 queue。
+当前仓库实现了完整 MVP 主链路：用户注册登录、浏览题目、Monaco 编辑代码、提交 Go/C++/Python、异步判题、轮询结果、查看个人提交历史和全站排行榜。题库包含 20 道原创面试高频题和 2 道 Starter 题，覆盖数组、哈希、滑动窗口、链表、树、图与动态规划。Compose 环境包含 Next.js 前端、Go API、独立 judge worker、PostgreSQL、Redis Streams 和 MinIO；Redis 消费支持成功后确认、三次重试、死信流和 pending 回收。无外部服务的本地测试默认使用内存 store 和内存 queue。
 
 ## Target Stack
 
@@ -29,7 +29,7 @@ Observability: slog + Prometheus + Grafana
 flowchart LR
     Browser[Browser] --> Frontend[Next.js frontend<br/>Monaco workbench]
     Frontend --> API[Go API<br/>net/http + chi]
-    API --> Store[(PostgreSQL<br/>submissions + outbox)]
+    API --> Store[(PostgreSQL<br/>users + sessions + submissions + outbox)]
     Store --> Relay[Outbox relay]
     Relay --> Queue[Redis Streams<br/>consumer group]
     Queue --> WorkerA[Judge worker A]
@@ -81,11 +81,12 @@ curl http://localhost:18080/healthz
 
 浏览器打开 `http://localhost:3000`。主页会进入首个题目工作台：
 
-1. 从左侧题目栏选择 `A+B Problem`。
-2. 在 Code 面板选择 Go、C++ 或 Python。
-3. 编辑代码并点击 Submit。
-4. 在 Result 面板观察 Queued、Running 和终态结果。
-5. 打开 Submissions 查看提交历史。
+1. 在顶部栏注册或登录。
+2. 从左侧题目栏选择 `A+B Problem`。
+3. 在 Code 面板选择 Go、C++ 或 Python。
+4. 编辑代码并点击 Submit。
+5. 在 Result 面板观察 Queued、Running 和终态结果。
+6. 打开 Submissions 查看个人提交历史，打开 Leaderboard 查看全站 AC 排名。
 
 横向扩展 worker：
 
@@ -129,6 +130,30 @@ Mobile:
 
 ## API Examples
 
+注册并保存 Cookie：
+
+```bash
+curl -i -c /tmp/gojudge.cookies \
+  -X POST http://localhost:18080/auth/register \
+  -H 'Content-Type: application/json' \
+  -d '{"username":"kai","password":"correct-password"}'
+```
+
+登录已有用户：
+
+```bash
+curl -i -c /tmp/gojudge.cookies \
+  -X POST http://localhost:18080/auth/login \
+  -H 'Content-Type: application/json' \
+  -d '{"username":"kai","password":"correct-password"}'
+```
+
+查看当前用户：
+
+```bash
+curl -b /tmp/gojudge.cookies http://localhost:18080/auth/me
+```
+
 列出题目：
 
 ```bash
@@ -144,7 +169,8 @@ curl http://localhost:18080/problems/sum
 提交 Go 代码：
 
 ```bash
-curl -X POST http://localhost:18080/submissions \
+curl -b /tmp/gojudge.cookies \
+  -X POST http://localhost:18080/submissions \
   -H 'Content-Type: application/json' \
   -d '{
     "problemId": "sum",
@@ -158,13 +184,26 @@ curl -X POST http://localhost:18080/submissions \
 查询提交：
 
 ```bash
-curl http://localhost:18080/submissions/sub-1
+curl -b /tmp/gojudge.cookies http://localhost:18080/submissions/sub-1
 ```
 
-查询提交记录：
+查询当前用户提交记录：
 
 ```bash
-curl http://localhost:18080/submissions
+curl -b /tmp/gojudge.cookies http://localhost:18080/submissions
+```
+
+查看排行榜：
+
+```bash
+curl http://localhost:18080/leaderboard
+```
+
+退出登录：
+
+```bash
+curl -i -b /tmp/gojudge.cookies -c /tmp/gojudge.cookies \
+  -X POST http://localhost:18080/auth/logout
 ```
 
 可能状态：
@@ -295,7 +334,7 @@ docs/screenshots/     desktop and mobile product screenshots
 
 ## Roadmap
 
-1. 已完成：Go API、PostgreSQL、Redis Streams、独立 worker、Docker sandbox、Go/C++/Python 和提交记录。
+1. 已完成：Go API、PostgreSQL、Redis Streams、独立 worker、Docker sandbox、Go/C++/Python、用户登录、个人提交记录和排行榜。
 2. 已完成：成功后确认、重试、死信流、pending recovery、编译/运行分离和输出上限。
 3. 已完成：Next.js + Monaco 分栏工作台、状态轮询、提交历史、响应式布局和 Playwright E2E。
 4. 已完成：Transactional Outbox、多 worker 直接消费、PostgreSQL 租约、fencing token 和故障接管。
@@ -311,5 +350,6 @@ docs/screenshots/     desktop and mobile product screenshots
 - 通过延迟 `XACK`、三次重试、死信流和 `XAUTOCLAIM` 实现至少一次任务处理与故障恢复。
 - 使用 Transactional Outbox 解决 PostgreSQL 与 Redis 双写一致性，并通过租约与 fencing token 拒绝重复执行的迟到结果。
 - 将 Redis Consumer Group 下沉到 judge worker，支持 `docker compose --scale worker=N` 横向扩展。
+- 使用 HttpOnly Cookie + 服务端 Session 实现可撤销登录态，提交记录绑定用户并按 AC 去重题目聚合排行榜。
 - 使用 Next.js + Monaco 构建桌面分栏、移动标签式判题工作台，并以 Playwright 覆盖 Go/C++/Python 浏览器端到端流程。
 - 设计 20+2 分层题库，以 PostgreSQL 标准化标签、幂等种子迁移和隐藏用例完整性测试保证可维护性。

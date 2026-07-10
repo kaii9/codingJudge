@@ -1,4 +1,11 @@
-import type { CreateSubmissionInput, Problem, Submission } from "@/lib/types";
+import type {
+  AuthInput,
+  CreateSubmissionInput,
+  LeaderboardEntry,
+  Problem,
+  Submission,
+  User,
+} from "@/lib/types";
 
 export class ApiError extends Error {
   constructor(
@@ -45,3 +52,23 @@ export const createSubmission = (input: CreateSubmissionInput) =>
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(input),
   });
+export const getCurrentUser = () => request<User>("/api/auth/me");
+export const login = (input: AuthInput) =>
+  request<User>("/api/auth/login", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+export const register = (input: AuthInput) =>
+  request<User>("/api/auth/register", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+export const logout = () =>
+  fetch("/api/auth/logout", { method: "POST" }).then(response => {
+    if (!response.ok) {
+      throw new ApiError(response.status, "request_failed", "Logout failed");
+    }
+  });
+export const getLeaderboard = () => request<LeaderboardEntry[]>("/api/leaderboard");

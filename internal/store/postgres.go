@@ -2,10 +2,12 @@ package store
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/kai/codingjudge/internal/domain"
 )
@@ -28,6 +30,100 @@ func NewPostgresStore(ctx context.Context, databaseURL string) (*PostgresStore, 
 
 func (s *PostgresStore) Close() {
 	s.pool.Close()
+}
+
+func (s *PostgresStore) CreateUser(ctx context.Context, username, passwordHash string) (domain.User, error) {
+	now := time.Now().UTC()
+	user := domain.User{
+		ID:        fmt.Sprintf("user-%d", now.UnixNano()),
+		Username:  username,
+		CreatedAt: now,
+	}
+	_, err := s.pool.Exec(ctx, `
+		INSERT INTO users (id, username, username_normalized, password_hash, created_at)
+		VALUES ($1, $2, $3, $4, $5)
+	`, user.ID, user.Username, normalizeUsername(username), passwordHash, user.CreatedAt)
+	if err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+			return domain.User{}, ErrConflict
+		}
+		return domain.User{}, err
+	}
+	return user, nil
+}
+
+func (s *PostgresStore) GetUserByUsername(ctx context.Context, username string) (domain.User, bool, error) {
+	var user domain.User
+	err := s.pool.QueryRow(ctx, `
+		SELECT id, username, created_at
+		FROM users
+		WHERE username_normalized = $1
+	`, normalizeUsername(username)).Scan(&user.ID, &user.Username, &user.CreatedAt)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return domain.User{}, false, nil
+		}
+		return domain.User{}, false, err
+	}
+	return user, true, nil
+}
+
+func (s *PostgresStore) GetPasswordHashByUsername(ctx context.Context, username string) (string, domain.User, bool, error) {
+	var user domain.User
+	var passwordHash string
+	err := s.pool.QueryRow(ctx, `
+		SELECT id, username, password_hash, created_at
+		FROM users
+		WHERE username_normalized = $1
+	`, normalizeUsername(username)).Scan(&user.ID, &user.Username, &passwordHash, &user.CreatedAt)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return "", domain.User{}, false, nil
+		}
+		return "", domain.User{}, false, err
+	}
+	return passwordHash, user, true, nil
+}
+
+func (s *PostgresStore) CreateSession(ctx context.Context, userID, tokenHash string, expiresAt time.Time) (domain.Session, error) {
+	now := time.Now().UTC()
+	session := domain.Session{
+		TokenHash: tokenHash,
+		UserID:    userID,
+		ExpiresAt: expiresAt,
+		CreatedAt: now,
+	}
+	_, err := s.pool.Exec(ctx, `
+		INSERT INTO user_sessions (token_hash, user_id, expires_at, created_at)
+		VALUES ($1, $2, $3, $4)
+	`, session.TokenHash, session.UserID, session.ExpiresAt, session.CreatedAt)
+	if err != nil {
+		return domain.Session{}, err
+	}
+	return session, nil
+}
+
+func (s *PostgresStore) GetUserBySessionTokenHash(ctx context.Context, tokenHash string, now time.Time) (domain.User, bool, error) {
+	var user domain.User
+	err := s.pool.QueryRow(ctx, `
+		SELECT u.id, u.username, u.created_at
+		FROM user_sessions s
+		JOIN users u ON u.id = s.user_id
+		WHERE s.token_hash = $1 AND s.expires_at > $2
+	`, tokenHash, now).Scan(&user.ID, &user.Username, &user.CreatedAt)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return domain.User{}, false, nil
+		}
+		return domain.User{}, false, err
+	}
+	return user, true, nil
+}
+
+func (s *PostgresStore) DeleteSession(ctx context.Context, tokenHash string) error {
+	_, err := s.pool.Exec(ctx, `DELETE FROM user_sessions WHERE token_hash = $1`, tokenHash)
+	return err
 }
 
 func (s *PostgresStore) ListProblems(ctx context.Context) ([]domain.Problem, error) {
@@ -121,9 +217,9 @@ func (s *PostgresStore) CreateSubmission(ctx context.Context, sub domain.Submiss
 	}
 	defer tx.Rollback(ctx)
 	if _, err = tx.Exec(ctx, `
-		INSERT INTO submissions (id, problem_id, language, code, status, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7)
-	`, sub.ID, sub.ProblemID, sub.Language, sub.Code, sub.Status, sub.CreatedAt, sub.UpdatedAt); err != nil {
+		INSERT INTO submissions (id, user_id, problem_id, language, code, status, created_at, updated_at)
+		VALUES ($1, NULLIF($2, ''), $3, $4, $5, $6, $7, $8)
+	`, sub.ID, sub.UserID, sub.ProblemID, sub.Language, sub.Code, sub.Status, sub.CreatedAt, sub.UpdatedAt); err != nil {
 		return domain.Submission{}, err
 	}
 	if _, err = tx.Exec(ctx, `
@@ -140,7 +236,7 @@ func (s *PostgresStore) CreateSubmission(ctx context.Context, sub domain.Submiss
 
 func (s *PostgresStore) ListSubmissions(ctx context.Context) ([]domain.Submission, error) {
 	rows, err := s.pool.Query(ctx, `
-		SELECT id, problem_id, language, code, status, stdout, stderr, exit_code, duration_ms, created_at, updated_at
+		SELECT id, COALESCE(user_id, ''), problem_id, language, code, status, stdout, stderr, exit_code, duration_ms, created_at, updated_at
 		FROM submissions
 		ORDER BY updated_at DESC, id DESC
 	`)
@@ -160,9 +256,32 @@ func (s *PostgresStore) ListSubmissions(ctx context.Context) ([]domain.Submissio
 	return submissions, rows.Err()
 }
 
+func (s *PostgresStore) ListSubmissionsByUser(ctx context.Context, userID string) ([]domain.Submission, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT id, COALESCE(user_id, ''), problem_id, language, code, status, stdout, stderr, exit_code, duration_ms, created_at, updated_at
+		FROM submissions
+		WHERE user_id = $1
+		ORDER BY updated_at DESC, id DESC
+	`, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	submissions := []domain.Submission{}
+	for rows.Next() {
+		sub, err := scanSubmission(rows)
+		if err != nil {
+			return nil, err
+		}
+		submissions = append(submissions, sub)
+	}
+	return submissions, rows.Err()
+}
+
 func (s *PostgresStore) GetSubmission(ctx context.Context, id string) (domain.Submission, bool, error) {
 	row := s.pool.QueryRow(ctx, `
-		SELECT id, problem_id, language, code, status, stdout, stderr, exit_code, duration_ms, created_at, updated_at
+		SELECT id, COALESCE(user_id, ''), problem_id, language, code, status, stdout, stderr, exit_code, duration_ms, created_at, updated_at
 		FROM submissions
 		WHERE id = $1
 	`, id)
@@ -174,6 +293,53 @@ func (s *PostgresStore) GetSubmission(ctx context.Context, id string) (domain.Su
 		return domain.Submission{}, false, err
 	}
 	return sub, true, nil
+}
+
+func (s *PostgresStore) GetSubmissionForUser(ctx context.Context, id, userID string) (domain.Submission, bool, error) {
+	row := s.pool.QueryRow(ctx, `
+		SELECT id, COALESCE(user_id, ''), problem_id, language, code, status, stdout, stderr, exit_code, duration_ms, created_at, updated_at
+		FROM submissions
+		WHERE id = $1 AND user_id = $2
+	`, id, userID)
+	sub, err := scanSubmission(row)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return domain.Submission{}, false, nil
+		}
+		return domain.Submission{}, false, err
+	}
+	return sub, true, nil
+}
+
+func (s *PostgresStore) ListLeaderboard(ctx context.Context, limit int) ([]domain.LeaderboardEntry, error) {
+	if limit < 1 {
+		limit = 50
+	}
+	rows, err := s.pool.Query(ctx, `
+		SELECT u.id, u.username, COUNT(DISTINCT sub.problem_id) AS solved,
+		       COUNT(*) AS accepted_submissions, MAX(sub.updated_at) AS last_accepted_at
+		FROM submissions sub
+		JOIN users u ON u.id = sub.user_id
+		WHERE sub.status = $1
+		GROUP BY u.id, u.username
+		ORDER BY solved DESC, last_accepted_at ASC, u.username ASC
+		LIMIT $2
+	`, domain.StatusAccepted, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	entries := []domain.LeaderboardEntry{}
+	for rows.Next() {
+		var entry domain.LeaderboardEntry
+		if err := rows.Scan(&entry.UserID, &entry.Username, &entry.Solved, &entry.AcceptedSubmissions, &entry.LastAcceptedAt); err != nil {
+			return nil, err
+		}
+		entry.Rank = len(entries) + 1
+		entries = append(entries, entry)
+	}
+	return entries, rows.Err()
 }
 
 type submissionScanner interface {
@@ -188,6 +354,7 @@ func scanSubmission(row submissionScanner) (domain.Submission, error) {
 	var duration *int64
 	if err := row.Scan(
 		&sub.ID,
+		&sub.UserID,
 		&sub.ProblemID,
 		&sub.Language,
 		&sub.Code,
