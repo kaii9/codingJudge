@@ -13,7 +13,7 @@ Migration: versioned SQL files
 Queue: Redis Streams
 Sandbox: Docker
 Worker: Go judge-worker
-Storage: MinIO service included; test-case integration planned
+Storage: MinIO for object-backed test cases and submission artifacts
 Frontend: Next.js + React + Monaco Editor
 Deploy: Docker Compose
 CI/CD: GitHub Actions
@@ -36,12 +36,13 @@ flowchart LR
     Queue --> WorkerB[Judge worker B]
     WorkerA --> Store
     WorkerB --> Store
+    WorkerA --> MinIO[(MinIO<br/>test-case assets + artifacts)]
+    WorkerB --> MinIO
     WorkerA --> Docker[Docker sandbox<br/>network none, memory/cpu/pids limits]
     WorkerB --> Docker
-    MinIO[(MinIO<br/>integration planned)]
 ```
 
-前端只通过 API 创建和查询提交；API 在一个 PostgreSQL 事务中保存 submission 和 outbox 事件，relay 负责可靠发布到 Redis，但不消费任务。多个 worker 直接通过同一 Consumer Group 抢任务，Docker 沙箱只在 worker 中执行。PostgreSQL 租约和 fencing token 决定最终写权限，避免重复消息或旧 worker 的迟到结果覆盖新结果。
+前端只通过 API 创建和查询提交；API 在一个 PostgreSQL 事务中保存 submission 和 outbox 事件，relay 负责可靠发布到 Redis，但不消费任务。多个 worker 直接通过同一 Consumer Group 抢任务，Docker 沙箱只在 worker 中执行。数据库字段实现应用层租约和 fencing token 防护，决定最终写权限，避免重复消息或旧 worker 的迟到结果覆盖新结果。MinIO 承载 object-backed 测试用例文件和提交源码/stdout/stderr artifact，PostgreSQL 保存 object key、size 和 SHA256 metadata。
 
 ## Quick Start
 
@@ -124,9 +125,40 @@ Mobile:
 | `frontend` | Next.js standalone app and same-origin API proxy |
 | `api` | Problem/submission API and transactional outbox relay |
 | `worker` | Redis consumer, PostgreSQL lease owner and isolated Docker runner |
-| `postgres` | Problems, test cases, submissions and results |
+| `postgres` | Problems, test case metadata, submissions, artifact metadata and results |
 | `redis` | Redis Streams judge queue |
-| `minio` | Object storage service; test-case integration remains planned |
+| `minio` | Object-backed test case files and submission artifacts |
+
+## MinIO Asset Storage
+
+PostgreSQL 仍是系统事实源，保存题目、提交状态、租约 token、测试用例 metadata 和 artifact metadata。MinIO 只保存文件本体：
+
+- object-backed 测试用例：`cases/{problem_id}/{case_id}/input-{sha}.txt`、`cases/{problem_id}/{case_id}/output-{sha}.txt`
+- 判题证据文件：`artifacts/{submission_id}/attempt-{attempt}/token-{fencing_token}/source.txt`
+- 运行输出证据：`stdout.txt`、`stderr.txt`
+
+Worker 判题前会按 `input_object_key` / `expected_output_object_key` 从 MinIO 拉取大用例，并校验 PostgreSQL 中记录的 `size_bytes` 和 `sha256`；判题后会上传源码快照和 stdout/stderr artifact，再以当前 fencing token 条件写入 `submission_artifacts`。如果旧 Worker 租约过期后继续上传文件，object key 中的 token 会让文件不可覆盖，数据库条件写入会拒绝旧 token，最多留下可清理的孤儿对象。
+
+导入 object-backed 测试用例：
+
+```bash
+make upload-cases CASE_UPLOAD_PROBLEMS=sum
+```
+
+或者在 Compose 中运行一次性导入容器：
+
+```bash
+docker compose --profile assets run --rm case-uploader
+```
+
+本地文件布局：
+
+```text
+testdata/cases/{problem_id}/001.in
+testdata/cases/{problem_id}/001.out
+testdata/cases/{problem_id}/002.in
+testdata/cases/{problem_id}/002.out
+```
 
 ## API Examples
 
@@ -191,6 +223,18 @@ curl -b /tmp/gojudge.cookies http://localhost:18080/submissions/sub-1
 
 ```bash
 curl -b /tmp/gojudge.cookies http://localhost:18080/submissions
+```
+
+查看提交 artifact metadata：
+
+```bash
+curl -b /tmp/gojudge.cookies http://localhost:18080/submissions/sub-1/artifacts
+```
+
+下载单个 artifact 内容：
+
+```bash
+curl -b /tmp/gojudge.cookies http://localhost:18080/submissions/sub-1/artifacts/1
 ```
 
 查看排行榜：

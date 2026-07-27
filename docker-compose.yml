@@ -6,12 +6,19 @@ services:
       API_ADDR: ":8080"
       DATABASE_URL: "postgres://codingjudge:codingjudge@postgres:5432/codingjudge?sslmode=disable"
       REDIS_ADDR: "redis:6379"
+      MINIO_ENDPOINT: "minio:9000"
+      MINIO_ACCESS_KEY: "minioadmin"
+      MINIO_SECRET_KEY: "minioadmin"
+      MINIO_BUCKET: "codingjudge-assets"
+      MINIO_USE_SSL: "false"
     ports:
       - "18080:8080"
     depends_on:
       postgres:
         condition: service_healthy
       redis:
+        condition: service_healthy
+      minio:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/healthz"]
@@ -57,10 +64,17 @@ services:
       WORKER_SHUTDOWN_GRACE: "30s"
       JUDGE_WORKDIR: "/tmp/codingjudge-sandbox"
       WORKER_METRICS_ADDR: ":9091"
+      MINIO_ENDPOINT: "minio:9000"
+      MINIO_ACCESS_KEY: "minioadmin"
+      MINIO_SECRET_KEY: "minioadmin"
+      MINIO_BUCKET: "codingjudge-assets"
+      MINIO_USE_SSL: "false"
     depends_on:
       postgres:
         condition: service_healthy
       redis:
+        condition: service_healthy
+      minio:
         condition: service_healthy
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
@@ -71,6 +85,25 @@ services:
       - no-new-privileges:true
     cap_drop:
       - ALL
+
+  case-uploader:
+    build: .
+    profiles: [assets]
+    command: ["/app/upload-cases", "-cases-dir", "/cases", "-problems", "${CASE_UPLOAD_PROBLEMS:-sum}"]
+    environment:
+      DATABASE_URL: "postgres://codingjudge:codingjudge@postgres:5432/codingjudge?sslmode=disable"
+      MINIO_ENDPOINT: "minio:9000"
+      MINIO_ACCESS_KEY: "minioadmin"
+      MINIO_SECRET_KEY: "minioadmin"
+      MINIO_BUCKET: "codingjudge-assets"
+      MINIO_USE_SSL: "false"
+    volumes:
+      - ./testdata/cases:/cases:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
 
   prometheus:
     image: prom/prometheus:v3.13.0
@@ -129,6 +162,11 @@ services:
       - "19001:9001"
     volumes:
       - minio-data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
 
   grafana:
     image: grafana/grafana:13.0.2

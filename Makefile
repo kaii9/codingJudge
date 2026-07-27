@@ -2,7 +2,7 @@ GOCACHE_DIR := $(CURDIR)/.cache/go-build
 
 JUDGE_IMAGES := golang:1.25-alpine python:3.12-alpine gcc:13
 
-.PHONY: test frontend-deps frontend-test frontend-build test-all build run-api run-worker judge-images compose-up compose-down compose-config migrate-reliable-workers migrate-hot20 fault-test
+.PHONY: test frontend-deps frontend-test frontend-build test-all build run-api run-worker upload-cases judge-images compose-up compose-down compose-config migrate-reliable-workers migrate-hot20 fault-test smoke-minio-assets
 
 test:
 	mkdir -p $(GOCACHE_DIR)
@@ -15,6 +15,7 @@ frontend-test: frontend-deps
 	npm --prefix frontend run test:run
 
 frontend-build: frontend-deps
+	rm -rf frontend/.next
 	npm --prefix frontend run build
 
 test-all: test
@@ -23,12 +24,16 @@ test-all: test
 build:
 	go build -o bin/api ./cmd/api
 	go build -o bin/worker ./cmd/worker
+	go build -o bin/upload-cases ./cmd/upload-cases
 
 run-api:
 	go run ./cmd/api
 
 run-worker:
 	DATABASE_URL='postgres://codingjudge:codingjudge@localhost:15432/codingjudge?sslmode=disable' REDIS_ADDR=localhost:16379 JUDGE_WORKDIR=/tmp/codingjudge-sandbox go run ./cmd/worker
+
+upload-cases:
+	DATABASE_URL='postgres://codingjudge:codingjudge@localhost:15432/codingjudge?sslmode=disable' MINIO_ENDPOINT=localhost:19000 MINIO_ACCESS_KEY=minioadmin MINIO_SECRET_KEY=minioadmin MINIO_BUCKET=codingjudge-assets go run ./cmd/upload-cases -cases-dir testdata/cases -problems "$${CASE_UPLOAD_PROBLEMS:-sum}"
 
 judge-images:
 	@for image in $(JUDGE_IMAGES); do \
@@ -54,6 +59,9 @@ migrate-hot20:
 
 fault-test:
 	bash scripts/fault-test.sh
+
+smoke-minio-assets:
+	bash scripts/smoke-minio-assets.sh
 
 .PHONY: observability-config observability-up load-smoke load-baseline load-worker-scale
 

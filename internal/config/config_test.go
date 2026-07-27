@@ -103,6 +103,50 @@ func TestWorkerMetricsAddrDefaultsAndOverrides(t *testing.T) {
 	}
 }
 
+func TestLoadWorkerReadsMinIOConfig(t *testing.T) {
+	t.Parallel()
+	values := map[string]string{
+		"DATABASE_URL":     "postgres://db",
+		"REDIS_ADDR":       "redis:6379",
+		"MINIO_ENDPOINT":   "minio:9000",
+		"MINIO_ACCESS_KEY": "minioadmin",
+		"MINIO_SECRET_KEY": "minioadmin",
+		"MINIO_BUCKET":     "codingjudge-assets",
+		"MINIO_USE_SSL":    "true",
+	}
+	cfg, err := config.LoadWorker(func(key string) string { return values[key] })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.MinIOEndpoint != "minio:9000" || cfg.MinIOAccessKey != "minioadmin" || cfg.MinIOSecretKey != "minioadmin" || cfg.MinIOBucket != "codingjudge-assets" || !cfg.MinIOUseSSL {
+		t.Fatalf("MinIO config = %+v", cfg)
+	}
+}
+
+func TestLoadWorkerRejectsMalformedMinIOUseSSL(t *testing.T) {
+	t.Parallel()
+	values := map[string]string{
+		"DATABASE_URL":  "postgres://db",
+		"REDIS_ADDR":    "redis:6379",
+		"MINIO_USE_SSL": "sometimes",
+	}
+	if _, err := config.LoadWorker(func(key string) string { return values[key] }); err == nil {
+		t.Fatal("LoadWorker should reject malformed MINIO_USE_SSL")
+	}
+}
+
+func TestLoadWorkerRejectsPartialMinIOConfig(t *testing.T) {
+	t.Parallel()
+	values := map[string]string{
+		"DATABASE_URL":   "postgres://db",
+		"REDIS_ADDR":     "redis:6379",
+		"MINIO_ENDPOINT": "minio:9000",
+	}
+	if _, err := config.LoadWorker(func(key string) string { return values[key] }); err == nil {
+		t.Fatal("LoadWorker should reject partial MinIO configuration")
+	}
+}
+
 func TestLoadWorkerRejectsMalformedMetricsAddr(t *testing.T) {
 	t.Parallel()
 	values := map[string]string{
@@ -125,5 +169,20 @@ func TestValidateAPIRejectsPartialDurableConfiguration(t *testing.T) {
 	})
 	if err := config.ValidateAPI(cfg); err == nil {
 		t.Fatal("ValidateAPI should reject PostgreSQL without Redis")
+	}
+}
+
+func TestValidateAPIRejectsPartialMinIOConfig(t *testing.T) {
+	t.Parallel()
+	cfg := config.Load(func(key string) string {
+		switch key {
+		case "MINIO_ENDPOINT":
+			return "minio:9000"
+		default:
+			return ""
+		}
+	})
+	if err := config.ValidateAPI(cfg); err == nil {
+		t.Fatal("ValidateAPI should reject partial MinIO config")
 	}
 }

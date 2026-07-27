@@ -3,6 +3,7 @@ package judgeworker
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	"github.com/kai/codingjudge/internal/domain"
+	judgepkg "github.com/kai/codingjudge/internal/judge"
 	"github.com/kai/codingjudge/internal/store"
 )
 
@@ -31,6 +33,11 @@ type Judge interface {
 	Evaluate(context.Context, domain.Problem, domain.Language, string) (domain.JudgeResult, error)
 }
 
+type ObjectStore interface {
+	Get(context.Context, string) ([]byte, error)
+	Put(context.Context, string, []byte, string) error
+}
+
 // WorkerMetrics records worker-level observations.
 type WorkerMetrics interface {
 	WorkerJobStarted()
@@ -47,6 +54,7 @@ type Config struct {
 	MaxAttempts       int
 	Now               func() time.Time
 	Token             func() (string, error)
+	ArtifactStore     ObjectStore
 	Metrics           WorkerMetrics
 }
 
@@ -54,6 +62,7 @@ type Processor struct {
 	store   store.LeaseStore
 	queue   WorkerQueue
 	judge   Judge
+	objects ObjectStore
 	config  Config
 	metrics WorkerMetrics
 }
@@ -74,7 +83,7 @@ func NewProcessor(st store.LeaseStore, queue WorkerQueue, judge Judge, config Co
 	if config.Token == nil {
 		config.Token = randomToken
 	}
-	return &Processor{store: st, queue: queue, judge: judge, config: config, metrics: config.Metrics}
+	return &Processor{store: st, queue: queue, judge: judge, objects: config.ArtifactStore, config: config, metrics: config.Metrics}
 }
 
 func (p *Processor) Run(ctx context.Context) error {
@@ -174,6 +183,9 @@ func (p *Processor) processClaim(ctx context.Context, job domain.Job, claim doma
 		}
 		return domain.JudgeResult{}, p.handleInfrastructureError(ctx, job, claim, err)
 	}
+	if err := p.saveArtifacts(ctx, claim, result); err != nil {
+		return domain.JudgeResult{}, err
+	}
 	completed, err := p.store.CompleteSubmission(ctx, claim.Submission.ID, claim.Token, p.config.Now(), result)
 	if err != nil {
 		return domain.JudgeResult{}, fmt.Errorf("complete submission: %w", err)
@@ -198,7 +210,14 @@ func (p *Processor) evaluateWithHeartbeat(ctx context.Context, job domain.Job, c
 		}
 		heartbeatResult <- err
 	}()
-	result, evaluateErr := p.judge.Evaluate(judgeCtx, problem, claim.Submission.Language, claim.Submission.Code)
+	resolvedProblem, resolveErr := judgepkg.ResolveProblemTestCaseAssets(judgeCtx, problem, p.objects)
+	var result domain.JudgeResult
+	var evaluateErr error
+	if resolveErr != nil {
+		evaluateErr = resolveErr
+	} else {
+		result, evaluateErr = p.judge.Evaluate(judgeCtx, resolvedProblem, claim.Submission.Language, claim.Submission.Code)
+	}
 	close(done)
 	cancel()
 	heartbeatErr := <-heartbeatResult
@@ -209,6 +228,59 @@ func (p *Processor) evaluateWithHeartbeat(ctx context.Context, job domain.Job, c
 		return domain.JudgeResult{}, fmt.Errorf("judge submission: %w", evaluateErr)
 	}
 	return result, nil
+}
+
+func (p *Processor) saveArtifacts(ctx context.Context, claim domain.SubmissionClaim, result domain.JudgeResult) error {
+	if p.objects == nil {
+		return nil
+	}
+	type artifactPayload struct {
+		kind domain.ArtifactKind
+		data []byte
+	}
+	payloads := []artifactPayload{{
+		kind: domain.ArtifactKindSource,
+		data: []byte(claim.Submission.Code),
+	}}
+	if result.Stdout != "" {
+		payloads = append(payloads, artifactPayload{kind: domain.ArtifactKindStdout, data: []byte(result.Stdout)})
+	}
+	if result.Stderr != "" {
+		payloads = append(payloads, artifactPayload{kind: domain.ArtifactKindStderr, data: []byte(result.Stderr)})
+	}
+
+	now := p.config.Now()
+	artifacts := make([]domain.SubmissionArtifact, 0, len(payloads))
+	for _, payload := range payloads {
+		key := fmt.Sprintf("artifacts/%s/attempt-%d/token-%s/%s.txt",
+			claim.Submission.ID, claim.Attempts, claim.Token, payload.kind)
+		if err := p.objects.Put(ctx, key, payload.data, "text/plain; charset=utf-8"); err != nil {
+			slog.Warn("submission artifact upload failed", "submission_id", claim.Submission.ID, "kind", payload.kind, "error", err)
+			continue
+		}
+		sum := sha256.Sum256(payload.data)
+		artifacts = append(artifacts, domain.SubmissionArtifact{
+			SubmissionID: claim.Submission.ID,
+			Attempt:      claim.Attempts,
+			Token:        claim.Token,
+			Kind:         payload.kind,
+			ObjectKey:    key,
+			SHA256:       hex.EncodeToString(sum[:]),
+			SizeBytes:    int64(len(payload.data)),
+			CreatedAt:    now,
+		})
+	}
+	if len(artifacts) == 0 {
+		return nil
+	}
+	saved, err := p.store.SaveSubmissionArtifacts(ctx, claim.Submission.ID, claim.Token, now, artifacts)
+	if err != nil {
+		return fmt.Errorf("save submission artifacts: %w", err)
+	}
+	if !saved {
+		return ErrLeaseLost
+	}
+	return nil
 }
 
 func (p *Processor) heartbeat(ctx context.Context, done <-chan struct{}, job domain.Job, claim domain.SubmissionClaim) error {

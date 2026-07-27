@@ -14,6 +14,7 @@ import (
 	"github.com/kai/codingjudge/internal/config"
 	"github.com/kai/codingjudge/internal/httpapi"
 	"github.com/kai/codingjudge/internal/metrics"
+	"github.com/kai/codingjudge/internal/objectstore"
 	"github.com/kai/codingjudge/internal/outbox"
 	"github.com/kai/codingjudge/internal/problems"
 	"github.com/kai/codingjudge/internal/queue"
@@ -64,13 +65,31 @@ func main() {
 		slog.Warn("memory mode has no cross-process judge relay")
 	}
 
+	var options []httpapi.Option
+	options = append(options,
+		httpapi.WithHTTPMetrics(metricsApp),
+		httpapi.WithSubmissionMetrics(metricsApp),
+		httpapi.WithMetricsHandler(promhttp.HandlerFor(registry, promhttp.HandlerOpts{})),
+	)
+	if cfg.MinIOEndpoint != "" && cfg.MinIOAccessKey != "" && cfg.MinIOSecretKey != "" {
+		objects, err := objectstore.NewMinIO(objectstore.MinIOConfig{
+			Endpoint:  cfg.MinIOEndpoint,
+			AccessKey: cfg.MinIOAccessKey,
+			SecretKey: cfg.MinIOSecretKey,
+			Bucket:    cfg.MinIOBucket,
+			UseSSL:    cfg.MinIOUseSSL,
+		})
+		if err != nil {
+			slog.Error("api object store setup failed", "error", err)
+			os.Exit(1)
+		}
+		options = append(options, httpapi.WithObjectGetter(objects))
+		slog.Info("api object store enabled", "endpoint", cfg.MinIOEndpoint, "bucket", cfg.MinIOBucket)
+	}
+
 	server := &http.Server{
-		Addr: cfg.APIAddr,
-		Handler: httpapi.AccessLog(httpapi.NewServer(st,
-			httpapi.WithHTTPMetrics(metricsApp),
-			httpapi.WithSubmissionMetrics(metricsApp),
-			httpapi.WithMetricsHandler(promhttp.HandlerFor(registry, promhttp.HandlerOpts{})),
-		), slog.Default()),
+		Addr:              cfg.APIAddr,
+		Handler:           httpapi.AccessLog(httpapi.NewServer(st, options...), slog.Default()),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 	go func() {

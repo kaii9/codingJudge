@@ -13,17 +13,19 @@ import (
 )
 
 type MemoryStore struct {
-	mu          sync.RWMutex
-	problems    map[string]domain.Problem
-	submissions map[string]domain.Submission
-	users       map[string]memoryUser
-	usersByName map[string]string
-	sessions    map[string]memorySession
-	leases      map[string]memoryLease
-	outbox      map[int64]memoryOutbox
-	nextID      int
-	nextUser    int
-	nextOutbox  int64
+	mu           sync.RWMutex
+	problems     map[string]domain.Problem
+	submissions  map[string]domain.Submission
+	users        map[string]memoryUser
+	usersByName  map[string]string
+	sessions     map[string]memorySession
+	leases       map[string]memoryLease
+	outbox       map[int64]memoryOutbox
+	artifacts    map[string][]domain.SubmissionArtifact
+	nextID       int
+	nextUser     int
+	nextOutbox   int64
+	nextArtifact int64
 }
 
 var (
@@ -73,6 +75,7 @@ func NewMemoryStore(problems []domain.Problem) *MemoryStore {
 		sessions:    make(map[string]memorySession),
 		leases:      make(map[string]memoryLease),
 		outbox:      make(map[int64]memoryOutbox),
+		artifacts:   make(map[string][]domain.SubmissionArtifact),
 	}
 	for _, problem := range problems {
 		st.problems[problem.ID] = cloneProblem(problem)

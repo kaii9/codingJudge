@@ -132,3 +132,49 @@ func TestMemorySubmissionCreatesAndPublishesOutbox(t *testing.T) {
 		t.Fatalf("published events = %+v, %v", events, err)
 	}
 }
+
+func TestMemoryStoreSaveSubmissionArtifactsRequiresCurrentToken(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	now := time.Date(2026, 7, 28, 8, 0, 0, 0, time.UTC)
+	st := store.NewMemoryStore([]domain.Problem{{ID: "sum"}})
+	sub, err := st.CreateSubmission(ctx, domain.Submission{ProblemID: "sum", Language: domain.LanguageGo, Code: "code"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = st.ClaimSubmission(ctx, sub.ID, "worker-a", "token-a", "1-0", now, time.Second)
+	_, _ = st.ClaimSubmission(ctx, sub.ID, "worker-b", "token-b", "1-0", now.Add(2*time.Second), 30*time.Second)
+
+	stale := []domain.SubmissionArtifact{{
+		SubmissionID: sub.ID,
+		Attempt:      1,
+		Token:        "token-a",
+		Kind:         domain.ArtifactKindSource,
+		ObjectKey:    "artifacts/sub/attempt-1/token-a/source.txt",
+		SHA256:       "abc",
+		SizeBytes:    4,
+	}}
+	if ok, err := st.SaveSubmissionArtifacts(ctx, sub.ID, "token-a", now.Add(3*time.Second), stale); err != nil || ok {
+		t.Fatalf("stale SaveSubmissionArtifacts = %v, %v; want rejected", ok, err)
+	}
+
+	active := []domain.SubmissionArtifact{{
+		SubmissionID: sub.ID,
+		Attempt:      2,
+		Token:        "token-b",
+		Kind:         domain.ArtifactKindSource,
+		ObjectKey:    "artifacts/sub/attempt-2/token-b/source.txt",
+		SHA256:       "def",
+		SizeBytes:    4,
+	}}
+	if ok, err := st.SaveSubmissionArtifacts(ctx, sub.ID, "token-b", now.Add(3*time.Second), active); err != nil || !ok {
+		t.Fatalf("active SaveSubmissionArtifacts = %v, %v; want accepted", ok, err)
+	}
+	artifacts, err := st.ListSubmissionArtifacts(ctx, sub.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(artifacts) != 1 || artifacts[0].Token != "token-b" || artifacts[0].ObjectKey != active[0].ObjectKey {
+		t.Fatalf("artifacts = %+v, want only active token artifact", artifacts)
+	}
+}

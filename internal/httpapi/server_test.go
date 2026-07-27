@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -27,6 +28,17 @@ func (f *fakeSubmissionMetrics) SubmissionCreated(language string) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.languages = append(f.languages, language)
+}
+
+type fakeHTTPObjectStore struct {
+	objects map[string][]byte
+}
+
+func (s fakeHTTPObjectStore) Get(ctx context.Context, key string) ([]byte, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return append([]byte(nil), s.objects[key]...), nil
 }
 
 func TestHealthz(t *testing.T) {
@@ -439,6 +451,77 @@ func TestLeaderboardReturnsAcceptedCounts(t *testing.T) {
 	}
 	if entries[0].Username != "kai" || entries[0].Solved != 1 || entries[0].AcceptedSubmissions != 2 {
 		t.Fatalf("first entry = %+v, want kai solved=1 accepted=2", entries[0])
+	}
+}
+
+func TestSubmissionArtifactsRequireOwnerAndCanDownloadObject(t *testing.T) {
+	t.Parallel()
+
+	st := store.NewMemoryStore(testProblems())
+	ctx := context.Background()
+	user, err := st.CreateUser(ctx, "kai", "hash")
+	if err != nil {
+		t.Fatal(err)
+	}
+	other, err := st.CreateUser(ctx, "lin", "hash")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sub, err := st.CreateSubmission(ctx, domain.Submission{UserID: user.ID, ProblemID: "sum", Language: domain.LanguageGo, Code: "code"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	claim, err := st.ClaimSubmission(ctx, sub.ID, "worker", "token", "1-0", now, time.Minute)
+	if err != nil || claim.State != domain.ClaimAcquired {
+		t.Fatalf("ClaimSubmission = %+v, %v", claim, err)
+	}
+	artifact := domain.SubmissionArtifact{
+		Attempt:   1,
+		Kind:      domain.ArtifactKindStderr,
+		ObjectKey: "artifacts/sub/attempt-1/token/stderr.txt",
+		SHA256:    "sha",
+		SizeBytes: 6,
+	}
+	if ok, err := st.SaveSubmissionArtifacts(ctx, sub.ID, "token", now.Add(time.Second), []domain.SubmissionArtifact{artifact}); err != nil || !ok {
+		t.Fatalf("SaveSubmissionArtifacts = %v, %v", ok, err)
+	}
+	if ok, err := st.CompleteSubmission(ctx, sub.ID, "token", now.Add(2*time.Second), domain.JudgeResult{Status: domain.StatusRuntimeError}); err != nil || !ok {
+		t.Fatalf("CompleteSubmission = %v, %v", ok, err)
+	}
+	server := httpapi.NewServer(st, httpapi.WithObjectGetter(fakeHTTPObjectStore{objects: map[string][]byte{
+		artifact.ObjectKey: []byte("panic\n"),
+	}}))
+
+	req := httptest.NewRequest(http.MethodGet, "/submissions/"+sub.ID+"/artifacts", nil)
+	req.AddCookie(registerExistingUserSession(t, st, user.ID))
+	rec := httptest.NewRecorder()
+	server.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("list status = %d, want %d, body: %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	var artifacts []domain.SubmissionArtifact
+	if err := json.NewDecoder(rec.Body).Decode(&artifacts); err != nil {
+		t.Fatal(err)
+	}
+	if len(artifacts) != 1 || artifacts[0].ObjectKey != "" || artifacts[0].Token != "" || artifacts[0].Kind != domain.ArtifactKindStderr {
+		t.Fatalf("artifacts response = %+v", artifacts)
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/submissions/"+sub.ID+"/artifacts/"+strconv.FormatInt(artifacts[0].ID, 10), nil)
+	req.AddCookie(registerExistingUserSession(t, st, user.ID))
+	rec = httptest.NewRecorder()
+	server.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK || rec.Body.String() != "panic\n" {
+		t.Fatalf("download status=%d body=%q", rec.Code, rec.Body.String())
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/submissions/"+sub.ID+"/artifacts", nil)
+	req.AddCookie(registerExistingUserSession(t, st, other.ID))
+	rec = httptest.NewRecorder()
+	server.ServeHTTP(rec, req)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("other user list status = %d, want 404", rec.Code)
 	}
 }
 

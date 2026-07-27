@@ -236,6 +236,45 @@ func TestRenderFailsOnMissingMetric(t *testing.T) {
 	}
 }
 
+func TestMinIOAssetSmokeUsesAuthenticatedAlias(t *testing.T) {
+	script, err := os.ReadFile("smoke-minio-assets.sh")
+	if err != nil {
+		t.Fatalf("read smoke script: %v", err)
+	}
+	body := string(script)
+	if !strings.Contains(body, "mc alias set cj http://localhost:9000 minioadmin minioadmin") {
+		t.Fatal("smoke script must configure an authenticated MinIO alias before checking objects")
+	}
+	if strings.Contains(body, "mc stat \"local/") {
+		t.Fatal("smoke script must not check objects through the unauthenticated default local alias")
+	}
+}
+
+func TestMinIOAssetSmokeCleansComposeServices(t *testing.T) {
+	script, err := os.ReadFile("smoke-minio-assets.sh")
+	if err != nil {
+		t.Fatalf("read smoke script: %v", err)
+	}
+	body := string(script)
+	if !strings.Contains(body, "docker compose stop api worker postgres redis minio") {
+		t.Fatal("smoke script should stop services on exit by default")
+	}
+	if !strings.Contains(body, "SMOKE_KEEP_STACK") {
+		t.Fatal("smoke script should allow preserving the stack for debugging")
+	}
+}
+
+func TestFrontendBuildRemovesStaleNextOutput(t *testing.T) {
+	makefile, err := os.ReadFile("../Makefile")
+	if err != nil {
+		t.Fatalf("read Makefile: %v", err)
+	}
+	body := string(makefile)
+	if !strings.Contains(body, "rm -rf frontend/.next") {
+		t.Fatal("frontend-build should remove stale .next output before running next build")
+	}
+}
+
 func TestMain(m *testing.M) {
 	if err := os.Chdir("scripts"); err != nil {
 	}

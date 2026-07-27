@@ -13,12 +13,12 @@ import (
 )
 
 type fakeWorkerMetrics struct {
-	mu              sync.Mutex
-	starts          int
-	finishCalls     [][3]string // language, result, positive duration
-	retries         int
-	deadLetters     int
-	leaseTakeovers  int
+	mu             sync.Mutex
+	starts         int
+	finishCalls    [][3]string // language, result, positive duration
+	retries        int
+	deadLetters    int
+	leaseTakeovers int
 }
 
 func (m *fakeWorkerMetrics) WorkerJobStarted() {
@@ -48,7 +48,9 @@ func (m *fakeWorkerMetrics) WorkerLeaseTakeover() {
 }
 
 func fmtDuration(d time.Duration) string {
-	if d > 0 { return "positive" }
+	if d > 0 {
+		return "positive"
+	}
 	return "zero"
 }
 
@@ -248,14 +250,51 @@ func TestProcessorRecordsTakeoverMetric(t *testing.T) {
 	}
 }
 
+func TestProcessorUploadsSubmissionArtifactsWithClaimToken(t *testing.T) {
+	calls := []string{}
+	claim := acquiredClaim()
+	claim.Attempts = 2
+	claim.Token = "token-a"
+	st := &fakeStore{claim: claim, problem: domain.Problem{ID: "sum"}, completeOK: true, artifactOK: true, calls: &calls}
+	q := &fakeQueue{job: domain.Job{SubmissionID: "sub-1", Receipt: "1-0"}, calls: &calls}
+	j := &fakeJudge{result: domain.JudgeResult{
+		Status: domain.StatusRuntimeError,
+		Stdout: "partial output\n",
+		Stderr: "panic\n",
+	}, calls: &calls}
+	objects := &fakeArtifactStore{puts: map[string]string{}}
+	p := judgeworker.NewProcessor(st, q, j, judgeworker.Config{
+		WorkerID: "worker-a", LeaseDuration: time.Minute, HeartbeatInterval: time.Hour,
+		Token:         func() (string, error) { return "token-a", nil },
+		ArtifactStore: objects,
+	})
+
+	if err := p.ProcessOne(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if len(st.artifacts) != 3 {
+		t.Fatalf("stored artifacts = %+v, want source/stdout/stderr", st.artifacts)
+	}
+	for _, artifact := range st.artifacts {
+		if artifact.SubmissionID != "sub-1" || artifact.Attempt != 2 || artifact.Token != "token-a" {
+			t.Fatalf("artifact missing fencing metadata: %+v", artifact)
+		}
+		if _, ok := objects.puts[artifact.ObjectKey]; !ok {
+			t.Fatalf("artifact object %q was not uploaded; uploads=%v", artifact.ObjectKey, objects.puts)
+		}
+	}
+}
+
 type fakeStore struct {
 	claim       domain.SubmissionClaim
 	problem     domain.Problem
 	completeOK  bool
 	releaseOK   bool
 	renewOK     bool
+	artifactOK  bool
 	completeErr error
 	releaseErr  error
+	artifacts   []domain.SubmissionArtifact
 	calls       *[]string
 }
 
@@ -279,12 +318,17 @@ func (s *fakeStore) ReleaseSubmission(context.Context, string, string, time.Time
 	*s.calls = append(*s.calls, "release")
 	return s.releaseOK, s.releaseErr
 }
+func (s *fakeStore) SaveSubmissionArtifacts(_ context.Context, _ string, _ string, _ time.Time, artifacts []domain.SubmissionArtifact) (bool, error) {
+	*s.calls = append(*s.calls, "artifacts")
+	s.artifacts = append(s.artifacts, artifacts...)
+	return s.artifactOK, nil
+}
 
 type fakeQueue struct {
-	job       domain.Job
-	calls     *[]string
-	retryErr  error
-	deadErr   error
+	job      domain.Job
+	calls    *[]string
+	retryErr error
+	deadErr  error
 }
 
 func (q *fakeQueue) Dequeue(context.Context) (domain.Job, error) {
@@ -322,6 +366,22 @@ func (j *fakeJudge) Evaluate(ctx context.Context, _ domain.Problem, _ domain.Lan
 		return domain.JudgeResult{}, ctx.Err()
 	}
 	return j.result, j.err
+}
+
+type fakeArtifactStore struct {
+	puts map[string]string
+}
+
+func (s *fakeArtifactStore) Get(context.Context, string) ([]byte, error) {
+	return nil, errors.New("unexpected object get")
+}
+
+func (s *fakeArtifactStore) Put(ctx context.Context, key string, data []byte, _ string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	s.puts[key] = string(data)
+	return nil
 }
 
 func TestProcessorCancelsJudgeWhenLeaseIsLost(t *testing.T) {

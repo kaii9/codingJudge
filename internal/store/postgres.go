@@ -183,7 +183,11 @@ func (s *PostgresStore) GetProblem(ctx context.Context, id string) (domain.Probl
 	}
 
 	rows, err := s.pool.Query(ctx, `
-		SELECT input, expected_output
+		SELECT id, COALESCE(input, ''), COALESCE(expected_output, ''),
+		       COALESCE(input_object_key, ''), COALESCE(expected_output_object_key, ''),
+		       COALESCE(input_sha256, ''), COALESCE(expected_output_sha256, ''),
+		       COALESCE(input_size_bytes, 0), COALESCE(expected_output_size_bytes, 0),
+		       hidden
 		FROM problem_test_cases
 		WHERE problem_id = $1
 		ORDER BY id
@@ -194,7 +198,18 @@ func (s *PostgresStore) GetProblem(ctx context.Context, id string) (domain.Probl
 	defer rows.Close()
 	for rows.Next() {
 		var tc domain.TestCase
-		if err := rows.Scan(&tc.Input, &tc.ExpectedOutput); err != nil {
+		if err := rows.Scan(
+			&tc.ID,
+			&tc.Input,
+			&tc.ExpectedOutput,
+			&tc.InputObjectKey,
+			&tc.ExpectedOutputObjectKey,
+			&tc.InputSHA256,
+			&tc.ExpectedOutputSHA256,
+			&tc.InputSizeBytes,
+			&tc.ExpectedOutputSizeBytes,
+			&tc.Hidden,
+		); err != nil {
 			return domain.Problem{}, false, err
 		}
 		problem.TestCases = append(problem.TestCases, tc)
@@ -232,6 +247,30 @@ func (s *PostgresStore) CreateSubmission(ctx context.Context, sub domain.Submiss
 		return domain.Submission{}, err
 	}
 	return sub, nil
+}
+
+func (s *PostgresStore) ReplaceProblemTestCases(ctx context.Context, problemID string, cases []domain.TestCase) error {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	if _, err := tx.Exec(ctx, `DELETE FROM problem_test_cases WHERE problem_id = $1`, problemID); err != nil {
+		return err
+	}
+	for _, tc := range cases {
+		if _, err := tx.Exec(ctx, `
+			INSERT INTO problem_test_cases
+			    (problem_id, input, expected_output, input_object_key, expected_output_object_key,
+			     input_sha256, expected_output_sha256, input_size_bytes, expected_output_size_bytes, hidden)
+			VALUES ($1, NULLIF($2, ''), NULLIF($3, ''), NULLIF($4, ''), NULLIF($5, ''),
+			        NULLIF($6, ''), NULLIF($7, ''), NULLIF($8, 0), NULLIF($9, 0), $10)
+		`, problemID, tc.Input, tc.ExpectedOutput, tc.InputObjectKey, tc.ExpectedOutputObjectKey,
+			tc.InputSHA256, tc.ExpectedOutputSHA256, tc.InputSizeBytes, tc.ExpectedOutputSizeBytes, tc.Hidden); err != nil {
+			return err
+		}
+	}
+	return tx.Commit(ctx)
 }
 
 func (s *PostgresStore) ListSubmissions(ctx context.Context) ([]domain.Submission, error) {

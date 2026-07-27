@@ -13,6 +13,7 @@ import (
 	"github.com/kai/codingjudge/internal/judge"
 	"github.com/kai/codingjudge/internal/judgeworker"
 	"github.com/kai/codingjudge/internal/metrics"
+	"github.com/kai/codingjudge/internal/objectstore"
 	"github.com/kai/codingjudge/internal/queue"
 	"github.com/kai/codingjudge/internal/store"
 	"github.com/prometheus/client_golang/prometheus"
@@ -50,6 +51,27 @@ func main() {
 	metricsApp := metrics.New(registry)
 	metricsApp.SetWorkerSlots(float64(cfg.Concurrency))
 
+	var objects judgeworker.ObjectStore
+	if cfg.MinIOEndpoint != "" && cfg.MinIOAccessKey != "" && cfg.MinIOSecretKey != "" {
+		minioStore, err := objectstore.NewMinIO(objectstore.MinIOConfig{
+			Endpoint:  cfg.MinIOEndpoint,
+			AccessKey: cfg.MinIOAccessKey,
+			SecretKey: cfg.MinIOSecretKey,
+			Bucket:    cfg.MinIOBucket,
+			UseSSL:    cfg.MinIOUseSSL,
+		})
+		if err != nil {
+			slog.Error("worker object store setup failed", "error", err)
+			os.Exit(1)
+		}
+		if err := minioStore.EnsureBucket(ctx); err != nil {
+			slog.Error("worker object bucket setup failed", "bucket", cfg.MinIOBucket, "error", err)
+			os.Exit(1)
+		}
+		objects = minioStore
+		slog.Info("worker object store enabled", "endpoint", cfg.MinIOEndpoint, "bucket", cfg.MinIOBucket)
+	}
+
 	service := judge.NewService(judge.NewDockerRunnerWithWorkDir(cfg.JudgeImage, cfg.JudgeWorkdir), judge.WithMetrics(metricsApp))
 	slots := make([]judgeworker.Slot, 0, cfg.Concurrency)
 	for index := 0; index < cfg.Concurrency; index++ {
@@ -64,6 +86,7 @@ func main() {
 			LeaseDuration:     cfg.LeaseDuration,
 			HeartbeatInterval: cfg.HeartbeatInterval,
 			MaxAttempts:       cfg.MaxAttempts,
+			ArtifactStore:     objects,
 			Metrics:           metricsApp,
 		}))
 	}

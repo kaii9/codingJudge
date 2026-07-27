@@ -80,8 +80,16 @@ type Problem struct {
 }
 
 type TestCase struct {
-	Input          string
-	ExpectedOutput string
+	ID                      int64
+	Input                   string
+	ExpectedOutput          string
+	InputObjectKey          string
+	ExpectedOutputObjectKey string
+	InputSHA256             string
+	ExpectedOutputSHA256    string
+	InputSizeBytes          int64
+	ExpectedOutputSizeBytes int64
+	Hidden                  bool
 }
 
 type Submission struct {
@@ -124,6 +132,26 @@ type JudgeResult struct {
 	Stderr   string           `json:"stderr,omitempty"`
 	ExitCode int              `json:"exitCode,omitempty"`
 	Duration int64            `json:"durationMs,omitempty"`
+}
+
+type ArtifactKind string
+
+const (
+	ArtifactKindSource ArtifactKind = "source"
+	ArtifactKindStdout ArtifactKind = "stdout"
+	ArtifactKindStderr ArtifactKind = "stderr"
+)
+
+type SubmissionArtifact struct {
+	ID           int64        `json:"id"`
+	SubmissionID string       `json:"submissionId"`
+	Attempt      int          `json:"attempt"`
+	Token        string       `json:"-"`
+	Kind         ArtifactKind `json:"kind"`
+	ObjectKey    string       `json:"-"`
+	SHA256       string       `json:"sha256"`
+	SizeBytes    int64        `json:"sizeBytes"`
+	CreatedAt    time.Time    `json:"createdAt"`
 }
 
 type Job struct {

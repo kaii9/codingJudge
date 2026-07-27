@@ -174,3 +174,68 @@ func TestPostgresExpiredLeaseRejectsStaleCompletion(t *testing.T) {
 		t.Fatalf("active completion = %v, %v", ok, err)
 	}
 }
+
+func TestPostgresObjectBackedCasesAndArtifactFencing(t *testing.T) {
+	st := integrationStore(t)
+	ctx := context.Background()
+	if err := st.ReplaceProblemTestCases(ctx, "sum", []domain.TestCase{{
+		InputObjectKey:          "cases/sum/001.in",
+		ExpectedOutputObjectKey: "cases/sum/001.out",
+		InputSHA256:             "input-sha",
+		ExpectedOutputSHA256:    "output-sha",
+		InputSizeBytes:          4,
+		ExpectedOutputSizeBytes: 2,
+		Hidden:                  true,
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	problem, ok, err := st.GetProblem(ctx, "sum")
+	if err != nil || !ok {
+		t.Fatalf("GetProblem = %+v, %v, %v", problem, ok, err)
+	}
+	var objectCase domain.TestCase
+	for _, tc := range problem.TestCases {
+		if tc.InputObjectKey == "cases/sum/001.in" {
+			objectCase = tc
+			break
+		}
+	}
+	if objectCase.Input != "" || objectCase.ExpectedOutput != "" || objectCase.InputSHA256 != "input-sha" || objectCase.ExpectedOutputSHA256 != "output-sha" || !objectCase.Hidden {
+		t.Fatalf("object-backed case = %+v", objectCase)
+	}
+
+	sub, err := st.CreateSubmission(ctx, domain.Submission{ProblemID: "sum", Language: domain.LanguageGo, Code: "code"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	_, _ = st.ClaimSubmission(ctx, sub.ID, "worker-a", "token-a", "1-0", now, time.Second)
+	_, _ = st.ClaimSubmission(ctx, sub.ID, "worker-b", "token-b", "1-0", now.Add(2*time.Second), 30*time.Second)
+	stale := []domain.SubmissionArtifact{{
+		Attempt:   1,
+		Kind:      domain.ArtifactKindSource,
+		ObjectKey: "artifacts/stale/source.txt",
+		SHA256:    "stale-sha",
+		SizeBytes: 4,
+	}}
+	if ok, err := st.SaveSubmissionArtifacts(ctx, sub.ID, "token-a", now.Add(3*time.Second), stale); err != nil || ok {
+		t.Fatalf("stale SaveSubmissionArtifacts = %v, %v; want rejected", ok, err)
+	}
+	active := []domain.SubmissionArtifact{{
+		Attempt:   2,
+		Kind:      domain.ArtifactKindSource,
+		ObjectKey: "artifacts/active/source.txt",
+		SHA256:    "active-sha",
+		SizeBytes: 4,
+	}}
+	if ok, err := st.SaveSubmissionArtifacts(ctx, sub.ID, "token-b", now.Add(3*time.Second), active); err != nil || !ok {
+		t.Fatalf("active SaveSubmissionArtifacts = %v, %v; want accepted", ok, err)
+	}
+	artifacts, err := st.ListSubmissionArtifacts(ctx, sub.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(artifacts) != 1 || artifacts[0].ObjectKey != "artifacts/active/source.txt" || artifacts[0].Token != "token-b" {
+		t.Fatalf("artifacts = %+v, want active token artifact", artifacts)
+	}
+}

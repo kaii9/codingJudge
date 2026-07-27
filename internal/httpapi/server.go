@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -36,12 +37,18 @@ type ProblemStore interface {
 	DeleteSession(context.Context, string) error
 	ListSubmissionsByUser(context.Context, string) ([]domain.Submission, error)
 	GetSubmissionForUser(context.Context, string, string) (domain.Submission, bool, error)
+	ListSubmissionArtifacts(context.Context, string) ([]domain.SubmissionArtifact, error)
 	ListLeaderboard(context.Context, int) ([]domain.LeaderboardEntry, error)
+}
+
+type ObjectGetter interface {
+	Get(context.Context, string) ([]byte, error)
 }
 
 type Server struct {
 	store             ProblemStore
 	router            http.Handler
+	objects           ObjectGetter
 	metricsHandler    http.Handler
 	httpMetrics       HTTPMetrics
 	submissionMetrics SubmissionMetrics
@@ -82,6 +89,12 @@ func WithSubmissionMetrics(m SubmissionMetrics) Option {
 	}
 }
 
+func WithObjectGetter(objects ObjectGetter) Option {
+	return func(s *Server) {
+		s.objects = objects
+	}
+}
+
 func NewServer(store ProblemStore, options ...Option) *Server {
 	s := &Server{store: store}
 	for _, opt := range options {
@@ -108,6 +121,8 @@ func NewServer(store ProblemStore, options ...Option) *Server {
 	r.Post("/submissions", s.createSubmission)
 	r.Get("/submissions", s.listSubmissions)
 	r.Get("/submissions/{id}", s.getSubmission)
+	r.Get("/submissions/{id}/artifacts", s.listSubmissionArtifacts)
+	r.Get("/submissions/{id}/artifacts/{artifactID}", s.getSubmissionArtifact)
 	r.Get("/leaderboard", s.listLeaderboard)
 	r.NotFound(func(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "not found")
@@ -341,6 +356,88 @@ func (s *Server) getSubmission(w http.ResponseWriter, r *http.Request) {
 	}
 	sub.Code = ""
 	writeJSON(w, http.StatusOK, sub)
+}
+
+func (s *Server) listSubmissionArtifacts(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	user, ok, err := s.currentUser(r)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "get current user")
+		return
+	}
+	if !ok {
+		writeErrorCode(w, http.StatusUnauthorized, "unauthenticated", "login required")
+		return
+	}
+	if _, ok, err := s.store.GetSubmissionForUser(r.Context(), id, user.ID); err != nil {
+		writeError(w, http.StatusInternalServerError, "get submission")
+		return
+	} else if !ok {
+		writeError(w, http.StatusNotFound, "submission not found")
+		return
+	}
+	artifacts, err := s.store.ListSubmissionArtifacts(r.Context(), id)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "list submission artifacts")
+		return
+	}
+	for i := range artifacts {
+		artifacts[i].ObjectKey = ""
+	}
+	writeJSON(w, http.StatusOK, artifacts)
+}
+
+func (s *Server) getSubmissionArtifact(w http.ResponseWriter, r *http.Request) {
+	if s.objects == nil {
+		writeError(w, http.StatusServiceUnavailable, "object store is not configured")
+		return
+	}
+	id := chi.URLParam(r, "id")
+	artifactID, err := strconv.ParseInt(chi.URLParam(r, "artifactID"), 10, 64)
+	if err != nil || artifactID <= 0 {
+		writeError(w, http.StatusNotFound, "artifact not found")
+		return
+	}
+	user, ok, err := s.currentUser(r)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "get current user")
+		return
+	}
+	if !ok {
+		writeErrorCode(w, http.StatusUnauthorized, "unauthenticated", "login required")
+		return
+	}
+	if _, ok, err := s.store.GetSubmissionForUser(r.Context(), id, user.ID); err != nil {
+		writeError(w, http.StatusInternalServerError, "get submission")
+		return
+	} else if !ok {
+		writeError(w, http.StatusNotFound, "submission not found")
+		return
+	}
+	artifacts, err := s.store.ListSubmissionArtifacts(r.Context(), id)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "list submission artifacts")
+		return
+	}
+	var selected *domain.SubmissionArtifact
+	for i := range artifacts {
+		if artifacts[i].ID == artifactID {
+			selected = &artifacts[i]
+			break
+		}
+	}
+	if selected == nil {
+		writeError(w, http.StatusNotFound, "artifact not found")
+		return
+	}
+	data, err := s.objects.Get(r.Context(), selected.ObjectKey)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "get artifact object")
+		return
+	}
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(data)
 }
 
 func (s *Server) listLeaderboard(w http.ResponseWriter, r *http.Request) {

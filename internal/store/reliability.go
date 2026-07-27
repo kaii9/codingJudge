@@ -12,6 +12,7 @@ type LeaseStore interface {
 	GetProblem(context.Context, string) (domain.Problem, bool, error)
 	ClaimSubmission(context.Context, string, string, string, string, time.Time, time.Duration) (domain.SubmissionClaim, error)
 	RenewSubmissionLease(context.Context, string, string, time.Time, time.Duration) (bool, error)
+	SaveSubmissionArtifacts(context.Context, string, string, time.Time, []domain.SubmissionArtifact) (bool, error)
 	CompleteSubmission(context.Context, string, string, time.Time, domain.JudgeResult) (bool, error)
 	ReleaseSubmission(context.Context, string, string, time.Time, string) (bool, error)
 }
@@ -100,6 +101,37 @@ func (s *MemoryStore) CompleteSubmission(_ context.Context, id, token string, no
 	s.submissions[id] = sub
 	delete(s.leases, id)
 	return true, nil
+}
+
+func (s *MemoryStore) SaveSubmissionArtifacts(_ context.Context, id, token string, now time.Time, artifacts []domain.SubmissionArtifact) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	lease, ok := s.leases[id]
+	sub, found := s.submissions[id]
+	if !ok || !found || sub.Status != domain.StatusRunning || lease.token != token || !now.Before(lease.expiresAt) {
+		return false, nil
+	}
+	for _, artifact := range artifacts {
+		s.nextArtifact++
+		artifact.ID = s.nextArtifact
+		artifact.SubmissionID = id
+		artifact.Token = token
+		if artifact.CreatedAt.IsZero() {
+			artifact.CreatedAt = now
+		}
+		s.artifacts[id] = append(s.artifacts[id], artifact)
+	}
+	return true, nil
+}
+
+func (s *MemoryStore) ListSubmissionArtifacts(ctx context.Context, id string) ([]domain.SubmissionArtifact, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	artifacts := append([]domain.SubmissionArtifact(nil), s.artifacts[id]...)
+	return artifacts, nil
 }
 
 func (s *MemoryStore) ReleaseSubmission(_ context.Context, id, token string, now time.Time, cause string) (bool, error) {

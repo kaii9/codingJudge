@@ -151,6 +151,74 @@ func (s *PostgresStore) CompleteSubmission(ctx context.Context, id, token string
 	return tag.RowsAffected() == 1, err
 }
 
+func (s *PostgresStore) SaveSubmissionArtifacts(ctx context.Context, id, token string, now time.Time, artifacts []domain.SubmissionArtifact) (bool, error) {
+	if len(artifacts) == 0 {
+		return true, nil
+	}
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return false, err
+	}
+	defer tx.Rollback(ctx)
+	var active bool
+	if err := tx.QueryRow(ctx, `
+		SELECT EXISTS (
+			SELECT 1
+			FROM submissions
+			WHERE id = $1 AND judge_token = $2 AND status = $4 AND lease_expires_at > $3
+		)
+	`, id, token, now, domain.StatusRunning).Scan(&active); err != nil {
+		return false, err
+	}
+	if !active {
+		return false, tx.Commit(ctx)
+	}
+	for _, artifact := range artifacts {
+		_, err := tx.Exec(ctx, `
+			INSERT INTO submission_artifacts
+			    (submission_id, attempt, fencing_token, kind, object_key, sha256, size_bytes, created_at)
+			VALUES ($1, $3, $2, $4, $5, $6, $7, $8)
+			ON CONFLICT (submission_id, attempt, fencing_token, kind) DO NOTHING
+		`, id, token, artifact.Attempt, artifact.Kind, artifact.ObjectKey, artifact.SHA256, artifact.SizeBytes, now)
+		if err != nil {
+			return false, err
+		}
+	}
+	return true, tx.Commit(ctx)
+}
+
+func (s *PostgresStore) ListSubmissionArtifacts(ctx context.Context, id string) ([]domain.SubmissionArtifact, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT id, submission_id, attempt, fencing_token, kind, object_key, sha256, size_bytes, created_at
+		FROM submission_artifacts
+		WHERE submission_id = $1
+		ORDER BY id
+	`, id)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	artifacts := []domain.SubmissionArtifact{}
+	for rows.Next() {
+		var artifact domain.SubmissionArtifact
+		if err := rows.Scan(
+			&artifact.ID,
+			&artifact.SubmissionID,
+			&artifact.Attempt,
+			&artifact.Token,
+			&artifact.Kind,
+			&artifact.ObjectKey,
+			&artifact.SHA256,
+			&artifact.SizeBytes,
+			&artifact.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		artifacts = append(artifacts, artifact)
+	}
+	return artifacts, rows.Err()
+}
+
 func (s *PostgresStore) ReleaseSubmission(ctx context.Context, id, token string, now time.Time, cause string) (bool, error) {
 	tag, err := s.pool.Exec(ctx, `
 		UPDATE submissions

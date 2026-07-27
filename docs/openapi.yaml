@@ -215,6 +215,80 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+  /submissions/{id}/artifacts:
+    get:
+      summary: List current user's submission artifact metadata
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Artifact metadata for the submission
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/SubmissionArtifact"
+        "401":
+          description: Login required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Submission not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /submissions/{id}/artifacts/{artifactId}:
+    get:
+      summary: Download current user's submission artifact content
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: artifactId
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+      responses:
+        "200":
+          description: Artifact file content
+          content:
+            text/plain:
+              schema:
+                type: string
+        "401":
+          description: Login required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Submission or artifact not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "503":
+          description: Object store is not configured
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
   /leaderboard:
     get:
       summary: List accepted-submission leaderboard
@@ -346,6 +420,36 @@ components:
           type: string
           format: date-time
         updatedAt:
+          type: string
+          format: date-time
+    SubmissionArtifact:
+      type: object
+      required:
+        - id
+        - submissionId
+        - attempt
+        - kind
+        - sha256
+        - sizeBytes
+        - createdAt
+      properties:
+        id:
+          type: integer
+          minimum: 1
+        submissionId:
+          type: string
+        attempt:
+          type: integer
+          minimum: 1
+        kind:
+          type: string
+          enum: [source, stdout, stderr]
+        sha256:
+          type: string
+        sizeBytes:
+          type: integer
+          minimum: 0
+        createdAt:
           type: string
           format: date-time
     Problem:

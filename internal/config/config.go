@@ -23,11 +23,16 @@ const (
 )
 
 type Config struct {
-	APIAddr     string
-	DatabaseURL string
-	RedisAddr   string
-	StorageMode StorageMode
-	QueueMode   QueueMode
+	APIAddr        string
+	DatabaseURL    string
+	RedisAddr      string
+	StorageMode    StorageMode
+	QueueMode      QueueMode
+	MinIOEndpoint  string
+	MinIOAccessKey string
+	MinIOSecretKey string
+	MinIOBucket    string
+	MinIOUseSSL    bool
 }
 
 func Load(getenv func(string) string) Config {
@@ -39,6 +44,16 @@ func Load(getenv func(string) string) Config {
 	}
 	cfg.DatabaseURL = getenv("DATABASE_URL")
 	cfg.RedisAddr = getenv("REDIS_ADDR")
+	cfg.MinIOEndpoint = getenv("MINIO_ENDPOINT")
+	cfg.MinIOAccessKey = getenv("MINIO_ACCESS_KEY")
+	cfg.MinIOSecretKey = getenv("MINIO_SECRET_KEY")
+	cfg.MinIOBucket = getenv("MINIO_BUCKET")
+	if cfg.MinIOBucket == "" {
+		cfg.MinIOBucket = "codingjudge-assets"
+	}
+	if value := getenv("MINIO_USE_SSL"); value != "" {
+		cfg.MinIOUseSSL, _ = strconv.ParseBool(value)
+	}
 
 	if cfg.DatabaseURL != "" {
 		cfg.StorageMode = StoragePostgres
@@ -65,11 +80,19 @@ type WorkerConfig struct {
 	JudgeWorkdir      string
 	JudgeImage        string
 	MetricsAddr       string
+	MinIOEndpoint     string
+	MinIOAccessKey    string
+	MinIOSecretKey    string
+	MinIOBucket       string
+	MinIOUseSSL       bool
 }
 
 func ValidateAPI(cfg Config) error {
 	if (cfg.DatabaseURL == "") != (cfg.RedisAddr == "") {
 		return fmt.Errorf("DATABASE_URL and REDIS_ADDR must be configured together")
+	}
+	if err := validateMinIOValues(cfg.MinIOEndpoint, cfg.MinIOAccessKey, cfg.MinIOSecretKey); err != nil {
+		return err
 	}
 	return nil
 }
@@ -86,6 +109,10 @@ func LoadWorker(getenv func(string) string) (WorkerConfig, error) {
 		ShutdownGrace:     30 * time.Second,
 		JudgeWorkdir:      getenv("JUDGE_WORKDIR"),
 		JudgeImage:        getenv("JUDGE_IMAGE"),
+		MinIOEndpoint:     getenv("MINIO_ENDPOINT"),
+		MinIOAccessKey:    getenv("MINIO_ACCESS_KEY"),
+		MinIOSecretKey:    getenv("MINIO_SECRET_KEY"),
+		MinIOBucket:       getenv("MINIO_BUCKET"),
 	}
 	if cfg.DatabaseURL == "" || cfg.RedisAddr == "" {
 		return WorkerConfig{}, fmt.Errorf("DATABASE_URL and REDIS_ADDR are required")
@@ -126,7 +153,33 @@ func LoadWorker(getenv func(string) string) (WorkerConfig, error) {
 	if cfg.MetricsAddr != "" && !isValidAddr(cfg.MetricsAddr) {
 		return WorkerConfig{}, fmt.Errorf("WORKER_METRICS_ADDR %q is not a valid listen address", cfg.MetricsAddr)
 	}
+	if cfg.MinIOBucket == "" {
+		cfg.MinIOBucket = "codingjudge-assets"
+	}
+	if value := getenv("MINIO_USE_SSL"); value != "" {
+		parsed, err := strconv.ParseBool(value)
+		if err != nil {
+			return WorkerConfig{}, fmt.Errorf("MINIO_USE_SSL: must be a boolean")
+		}
+		cfg.MinIOUseSSL = parsed
+	}
+	if err := validateMinIOValues(cfg.MinIOEndpoint, cfg.MinIOAccessKey, cfg.MinIOSecretKey); err != nil {
+		return WorkerConfig{}, err
+	}
 	return cfg, nil
+}
+
+func validateMinIOValues(endpoint, accessKey, secretKey string) error {
+	configured := 0
+	for _, value := range []string{endpoint, accessKey, secretKey} {
+		if value != "" {
+			configured++
+		}
+	}
+	if configured != 0 && configured != 3 {
+		return fmt.Errorf("MINIO_ENDPOINT, MINIO_ACCESS_KEY and MINIO_SECRET_KEY must be configured together")
+	}
+	return nil
 }
 
 func parsePositiveInt(value string, fallback int) (int, error) {
