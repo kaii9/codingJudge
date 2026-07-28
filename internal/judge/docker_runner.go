@@ -110,6 +110,7 @@ func (r *DockerRunner) RunBatch(ctx context.Context, req RunRequest, inputs []st
 		if err != nil {
 			return nil, err
 		}
+		compileResult.Stage = StageCompile
 		if compileResult.TimedOut {
 			compileResult.Stderr = "compilation timed out"
 			return []RunResult{compileResult}, nil
@@ -149,6 +150,7 @@ func (r *DockerRunner) runPrepared(ctx context.Context, req RunRequest, workdir 
 		args = replaceImage(args, r.image)
 	}
 	result, err := executeDocker(runCtx, args)
+	result.Stage = StageRun
 	if ctx.Err() != nil {
 		return result, ctx.Err()
 	}

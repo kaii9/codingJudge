@@ -89,7 +89,7 @@ services:
   case-uploader:
     build: .
     profiles: [assets]
-    command: ["/app/upload-cases", "-cases-dir", "/cases", "-problems", "${CASE_UPLOAD_PROBLEMS:-sum}"]
+    command: ["sh", "-c", "/app/upload-cases -cases-dir /cases ${CASE_UPLOAD_FLAGS:--all}"]
     environment:
       DATABASE_URL: "postgres://codingjudge:codingjudge@postgres:5432/codingjudge?sslmode=disable"
       MINIO_ENDPOINT: "minio:9000"

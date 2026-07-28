@@ -411,6 +411,7 @@ components:
             - running
             - accepted
             - wrong_answer
+            - compile_error
             - runtime_error
             - time_limit_exceeded
             - internal_error
@@ -501,7 +502,7 @@ components:
       properties:
         status:
           type: string
-          enum: [accepted, wrong_answer, runtime_error, time_limit_exceeded, internal_error]
+          enum: [accepted, wrong_answer, compile_error, runtime_error, time_limit_exceeded, internal_error]
         stdout:
           type: string
         stderr:

@@ -95,3 +95,39 @@ func TestUploaderRejectsMissingOutputPair(t *testing.T) {
 		t.Fatal("UploadProblem should reject missing .out pair")
 	}
 }
+
+func TestDiscoverProblemsReturnsSortedProblemDirectoriesWithCases(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	for _, problemID := range []string{"target-pair", "balanced-delimiters"} {
+		problemDir := filepath.Join(root, problemID)
+		if err := os.MkdirAll(problemDir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(problemDir, "001.in"), []byte("input\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(root, "README.md"), []byte("ignore me"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	emptyDir := filepath.Join(root, "empty-problem")
+	if err := os.MkdirAll(emptyDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	problems, err := DiscoverProblems(root)
+	if err != nil {
+		t.Fatalf("DiscoverProblems returned error: %v", err)
+	}
+	want := []string{"balanced-delimiters", "target-pair"}
+	if len(problems) != len(want) {
+		t.Fatalf("problems = %#v, want %#v", problems, want)
+	}
+	for i := range want {
+		if problems[i] != want[i] {
+			t.Fatalf("problems = %#v, want %#v", problems, want)
+		}
+	}
+}

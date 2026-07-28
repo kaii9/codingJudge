@@ -363,6 +363,8 @@ func metricResult(result domain.JudgeResult, processErr error) string {
 		return "accepted"
 	case domain.StatusWrongAnswer:
 		return "wrong_answer"
+	case domain.StatusCompileError:
+		return "compile_error"
 	case domain.StatusRuntimeError:
 		return "runtime_error"
 	case domain.StatusTimeLimitExceeded:

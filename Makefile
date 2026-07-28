@@ -9,6 +9,7 @@ test:
 	GOCACHE=$(GOCACHE_DIR) go test ./...
 
 frontend-deps:
+	rm -rf frontend/node_modules
 	npm --prefix frontend ci
 
 frontend-test: frontend-deps
@@ -33,7 +34,7 @@ run-worker:
 	DATABASE_URL='postgres://codingjudge:codingjudge@localhost:15432/codingjudge?sslmode=disable' REDIS_ADDR=localhost:16379 JUDGE_WORKDIR=/tmp/codingjudge-sandbox go run ./cmd/worker
 
 upload-cases:
-	DATABASE_URL='postgres://codingjudge:codingjudge@localhost:15432/codingjudge?sslmode=disable' MINIO_ENDPOINT=localhost:19000 MINIO_ACCESS_KEY=minioadmin MINIO_SECRET_KEY=minioadmin MINIO_BUCKET=codingjudge-assets go run ./cmd/upload-cases -cases-dir testdata/cases -problems "$${CASE_UPLOAD_PROBLEMS:-sum}"
+	DATABASE_URL='postgres://codingjudge:codingjudge@localhost:15432/codingjudge?sslmode=disable' MINIO_ENDPOINT=localhost:19000 MINIO_ACCESS_KEY=minioadmin MINIO_SECRET_KEY=minioadmin MINIO_BUCKET=codingjudge-assets go run ./cmd/upload-cases -cases-dir testdata/cases $${CASE_UPLOAD_FLAGS:--all}
 
 judge-images:
 	@for image in $(JUDGE_IMAGES); do \

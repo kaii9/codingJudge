@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { draftKey, isTerminalStatus, starterTemplate, statusMeta } from "@/lib/judge";
 
 describe("judge helpers", () => {
-  it.each(["accepted", "wrong_answer", "runtime_error", "time_limit_exceeded", "internal_error"] as const)(
+  it.each(["accepted", "wrong_answer", "compile_error", "runtime_error", "time_limit_exceeded", "internal_error"] as const)(
     "treats %s as terminal", status => expect(isTerminalStatus(status)).toBe(true),
   );
   it.each(["queued", "running"] as const)(
@@ -24,6 +24,7 @@ describe("judge helpers", () => {
     ["running", "Running", "info"],
     ["accepted", "Accepted", "success"],
     ["wrong_answer", "Wrong Answer", "warning"],
+    ["compile_error", "Compile Error", "danger"],
     ["runtime_error", "Runtime Error", "danger"],
     ["time_limit_exceeded", "Time Limit Exceeded", "danger"],
     ["internal_error", "Internal Error", "danger"],

@@ -18,12 +18,15 @@ import (
 func main() {
 	var casesDir string
 	var problems string
+	var all bool
 	flag.StringVar(&casesDir, "cases-dir", "testdata/cases", "root directory containing {problem_id}/{case}.in and {case}.out files")
 	flag.StringVar(&problems, "problems", "", "comma-separated problem ids to upload")
+	flag.BoolVar(&all, "all", false, "upload every problem directory found under -cases-dir")
 	flag.Parse()
 
-	if strings.TrimSpace(problems) == "" {
-		slog.Error("missing required -problems")
+	problemIDs, err := selectedProblems(casesDir, problems, all)
+	if err != nil {
+		slog.Error("select problem cases failed", "error", err)
 		os.Exit(2)
 	}
 	databaseURL := os.Getenv("DATABASE_URL")
@@ -69,7 +72,7 @@ func main() {
 	}
 
 	uploader := caseassets.NewUploader(st, objects)
-	for _, problemID := range splitCSV(problems) {
+	for _, problemID := range problemIDs {
 		report, err := uploader.UploadProblem(ctx, casesDir, problemID)
 		if err != nil {
 			slog.Error("upload problem cases failed", "problem_id", problemID, "error", err)
@@ -77,6 +80,16 @@ func main() {
 		}
 		fmt.Printf("uploaded problem=%s cases=%d\n", report.ProblemID, report.CaseCount)
 	}
+}
+
+func selectedProblems(casesDir, problems string, all bool) ([]string, error) {
+	if all {
+		return caseassets.DiscoverProblems(casesDir)
+	}
+	if strings.TrimSpace(problems) == "" {
+		return nil, fmt.Errorf("missing required -problems or -all")
+	}
+	return splitCSV(problems), nil
 }
 
 func splitCSV(value string) []string {

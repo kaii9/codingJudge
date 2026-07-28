@@ -37,6 +37,7 @@ const (
 	StatusRunning           SubmissionStatus = "running"
 	StatusAccepted          SubmissionStatus = "accepted"
 	StatusWrongAnswer       SubmissionStatus = "wrong_answer"
+	StatusCompileError      SubmissionStatus = "compile_error"
 	StatusRuntimeError      SubmissionStatus = "runtime_error"
 	StatusTimeLimitExceeded SubmissionStatus = "time_limit_exceeded"
 	StatusInternalError     SubmissionStatus = "internal_error"
@@ -46,6 +47,7 @@ func IsTerminalSubmissionStatus(status SubmissionStatus) bool {
 	switch status {
 	case StatusAccepted,
 		StatusWrongAnswer,
+		StatusCompileError,
 		StatusRuntimeError,
 		StatusTimeLimitExceeded,
 		StatusInternalError:

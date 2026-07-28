@@ -16,6 +16,7 @@ const statusIcons: Record<SubmissionStatus, LucideIcon> = {
   running: LoaderCircle,
   accepted: CircleCheck,
   wrong_answer: CircleX,
+  compile_error: TriangleAlert,
   runtime_error: TriangleAlert,
   time_limit_exceeded: TimerOff,
   internal_error: ServerCrash,

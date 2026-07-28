@@ -148,6 +148,26 @@ func TestProcessorRecordsWrongAnswerNotAccepted(t *testing.T) {
 	}
 }
 
+func TestProcessorRecordsCompileErrorMetric(t *testing.T) {
+	calls := []string{}
+	st := &fakeStore{claim: acquiredClaim(), problem: domain.Problem{ID: "sum"}, completeOK: true, calls: &calls}
+	q := &fakeQueue{job: domain.Job{SubmissionID: "sub-1", Receipt: "1-0"}, calls: &calls}
+	j := &fakeJudge{result: domain.JudgeResult{Status: domain.StatusCompileError}, calls: &calls}
+	m := &fakeWorkerMetrics{}
+	p := judgeworker.NewProcessor(st, q, j, judgeworker.Config{
+		WorkerID: "worker-a", LeaseDuration: time.Minute, HeartbeatInterval: time.Hour,
+		Token: func() (string, error) { return "token", nil }, Metrics: m,
+	})
+	if err := p.ProcessOne(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if len(m.finishCalls) != 1 || m.finishCalls[0][1] != "compile_error" {
+		t.Errorf("finish calls = %v, want result=compile_error", m.finishCalls)
+	}
+}
+
 func TestProcessorSkipsRetryCounterOnReleaseFailure(t *testing.T) {
 	// 验证 ReleaseSubmission 失败时不增加 retry 计数器。
 	calls := []string{}

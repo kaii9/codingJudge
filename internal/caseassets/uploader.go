@@ -35,6 +35,31 @@ func NewUploader(repo Repository, objects ObjectWriter) *Uploader {
 	return &Uploader{repo: repo, objects: objects}
 }
 
+func DiscoverProblems(root string) ([]string, error) {
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		return nil, err
+	}
+	problems := make([]string, 0)
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		caseEntries, err := os.ReadDir(filepath.Join(root, entry.Name()))
+		if err != nil {
+			return nil, err
+		}
+		for _, caseEntry := range caseEntries {
+			if !caseEntry.IsDir() && filepath.Ext(caseEntry.Name()) == ".in" {
+				problems = append(problems, entry.Name())
+				break
+			}
+		}
+	}
+	sort.Strings(problems)
+	return problems, nil
+}
+
 func (u *Uploader) UploadProblem(ctx context.Context, root, problemID string) (UploadReport, error) {
 	if strings.TrimSpace(problemID) == "" {
 		return UploadReport{}, fmt.Errorf("problem id is required")

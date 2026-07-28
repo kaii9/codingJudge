@@ -13,6 +13,7 @@ func TestIsTerminalSubmissionStatus(t *testing.T) {
 	for _, status := range []domain.SubmissionStatus{
 		domain.StatusAccepted,
 		domain.StatusWrongAnswer,
+		domain.StatusCompileError,
 		domain.StatusRuntimeError,
 		domain.StatusTimeLimitExceeded,
 		domain.StatusInternalError,

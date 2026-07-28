@@ -18,6 +18,7 @@ cleanup() {
 trap cleanup EXIT
 
 docker compose up -d --build postgres redis minio api worker
+docker compose --profile assets build case-uploader
 docker compose --profile assets run --rm case-uploader
 
 curl -fsS -c "$COOKIE_FILE" \
@@ -74,4 +75,10 @@ if [[ "$case_count" -lt 2 ]]; then
   exit 1
 fi
 
-echo "minio asset smoke passed submission=$submission_id artifacts=$artifact_count cases=$case_count"
+hot20_case_count="$(docker compose exec -T postgres psql -U codingjudge -d codingjudge -tAc "SELECT count(*) FROM problem_test_cases tc JOIN problems p ON p.id = tc.problem_id WHERE p.collection='hot20' AND tc.input_object_key IS NOT NULL AND tc.expected_output_object_key IS NOT NULL")"
+if [[ "$hot20_case_count" -lt 120 ]]; then
+  echo "expected Hot20 object-backed cases, got $hot20_case_count" >&2
+  exit 1
+fi
+
+echo "minio asset smoke passed submission=$submission_id artifacts=$artifact_count cases=$case_count hot20_cases=$hot20_case_count"

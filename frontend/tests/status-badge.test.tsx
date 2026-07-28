@@ -10,6 +10,7 @@ const expectedStatuses = [
   ["running", "Running", "info", "lucide-loader-circle"],
   ["accepted", "Accepted", "success", "lucide-circle-check"],
   ["wrong_answer", "Wrong Answer", "warning", "lucide-circle-x"],
+  ["compile_error", "Compile Error", "danger", "lucide-triangle-alert"],
   ["runtime_error", "Runtime Error", "danger", "lucide-triangle-alert"],
   ["time_limit_exceeded", "Time Limit Exceeded", "danger", "lucide-timer-off"],
   ["internal_error", "Internal Error", "danger", "lucide-server-crash"],

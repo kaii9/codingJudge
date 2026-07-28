@@ -16,12 +16,20 @@ type RunRequest struct {
 	MemoryLimitMB int
 }
 
+type RunStage string
+
+const (
+	StageRun     RunStage = "run"
+	StageCompile RunStage = "compile"
+)
+
 type RunResult struct {
 	Stdout   string
 	Stderr   string
 	ExitCode int
 	Duration int64
 	TimedOut bool
+	Stage    RunStage
 }
 
 type Runner interface {
@@ -127,6 +135,10 @@ func judgeRun(tc domain.TestCase, run RunResult) (domain.JudgeResult, bool) {
 		Stderr:   run.Stderr,
 		ExitCode: run.ExitCode,
 		Duration: run.Duration,
+	}
+	if run.Stage == StageCompile {
+		result.Status = domain.StatusCompileError
+		return result, true
 	}
 	if run.TimedOut {
 		result.Status = domain.StatusTimeLimitExceeded

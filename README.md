@@ -142,7 +142,13 @@ Worker 判题前会按 `input_object_key` / `expected_output_object_key` 从 Min
 导入 object-backed 测试用例：
 
 ```bash
-make upload-cases CASE_UPLOAD_PROBLEMS=sum
+make upload-cases
+```
+
+默认会扫描 `testdata/cases/*` 并上传全部本地 case 目录，包括 Starter 示例和 Hot20 题库。只导入部分题目时可覆盖参数：
+
+```bash
+make upload-cases CASE_UPLOAD_FLAGS='-problems sum,target-pair'
 ```
 
 或者在 Compose 中运行一次性导入容器：
@@ -256,6 +262,7 @@ curl -i -b /tmp/gojudge.cookies -c /tmp/gojudge.cookies \
 - `running`
 - `accepted`
 - `wrong_answer`
+- `compile_error`
 - `runtime_error`
 - `time_limit_exceeded`
 - `internal_error`

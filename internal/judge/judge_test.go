@@ -142,6 +142,53 @@ func TestServiceReportsTimeLimitExceeded(t *testing.T) {
 	}
 }
 
+func TestServiceReportsCompileErrorForCompileStageFailure(t *testing.T) {
+	t.Parallel()
+
+	service := judge.NewService(&fakeBatchRunner{results: []judge.RunResult{
+		{Stage: judge.StageCompile, Stderr: "syntax error", ExitCode: 1},
+	}})
+
+	result, err := service.Evaluate(context.Background(), domain.Problem{
+		ID: "compile-fail",
+		TestCases: []domain.TestCase{
+			{Input: "1 2\n", ExpectedOutput: "3\n"},
+		},
+	}, domain.LanguageGo, "bad code")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if result.Status != domain.StatusCompileError {
+		t.Fatalf("status = %q, want %q", result.Status, domain.StatusCompileError)
+	}
+	if result.Stderr != "syntax error" {
+		t.Fatalf("stderr = %q, want compile stderr", result.Stderr)
+	}
+}
+
+func TestServiceKeepsRuntimeFailureAsRuntimeError(t *testing.T) {
+	t.Parallel()
+
+	service := judge.NewService(&fakeRunner{results: []judge.RunResult{
+		{Stage: judge.StageRun, Stderr: "panic", ExitCode: 2},
+	}})
+
+	result, err := service.Evaluate(context.Background(), domain.Problem{
+		ID: "runtime-fail",
+		TestCases: []domain.TestCase{
+			{Input: "1 2\n", ExpectedOutput: "3\n"},
+		},
+	}, domain.LanguagePython, "raise")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if result.Status != domain.StatusRuntimeError {
+		t.Fatalf("status = %q, want %q", result.Status, domain.StatusRuntimeError)
+	}
+}
+
 func TestEvaluateReturnsRunnerInfrastructureError(t *testing.T) {
 	t.Parallel()
 	want := errors.New("docker daemon unavailable")

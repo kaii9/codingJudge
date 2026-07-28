@@ -137,6 +137,19 @@ func TestDockerCompileArgsSkipsInterpretedLanguage(t *testing.T) {
 	}
 }
 
+func TestRunResultStagesIdentifyCompileAndRunPhases(t *testing.T) {
+	t.Parallel()
+
+	compile := RunResult{Stage: StageCompile, ExitCode: 1}
+	run := RunResult{Stage: StageRun, ExitCode: 1}
+	if compile.Stage != StageCompile {
+		t.Fatalf("compile stage = %q, want %q", compile.Stage, StageCompile)
+	}
+	if run.Stage != StageRun {
+		t.Fatalf("run stage = %q, want %q", run.Stage, StageRun)
+	}
+}
+
 func containsSubstring(values []string, substr string) bool {
 	for _, value := range values {
 		if strings.Contains(value, substr) {

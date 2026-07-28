@@ -275,6 +275,72 @@ func TestFrontendBuildRemovesStaleNextOutput(t *testing.T) {
 	}
 }
 
+func TestFrontendDepsRemovesStaleNodeModules(t *testing.T) {
+	makefile, err := os.ReadFile("../Makefile")
+	if err != nil {
+		t.Fatalf("read Makefile: %v", err)
+	}
+	if !strings.Contains(string(makefile), "rm -rf frontend/node_modules") {
+		t.Fatal("frontend-deps should remove stale node_modules before npm ci")
+	}
+}
+
+func TestCaseUploaderDefaultsToAllCaseAssets(t *testing.T) {
+	makefile, err := os.ReadFile("../Makefile")
+	if err != nil {
+		t.Fatalf("read Makefile: %v", err)
+	}
+	compose, err := os.ReadFile("../docker-compose.yml")
+	if err != nil {
+		t.Fatalf("read docker-compose.yml: %v", err)
+	}
+	if !strings.Contains(string(makefile), "$${CASE_UPLOAD_FLAGS:--all}") {
+		t.Fatal("Makefile upload-cases target should default to -all")
+	}
+	if !strings.Contains(string(compose), "${CASE_UPLOAD_FLAGS:--all}") {
+		t.Fatal("case-uploader compose service should default to -all")
+	}
+}
+
+func TestMinIOAssetSmokeChecksHot20ObjectBackedCases(t *testing.T) {
+	script, err := os.ReadFile("smoke-minio-assets.sh")
+	if err != nil {
+		t.Fatalf("read smoke script: %v", err)
+	}
+	body := string(script)
+	if !strings.Contains(body, "collection='hot20'") || !strings.Contains(body, "expected Hot20 object-backed cases") {
+		t.Fatal("MinIO smoke should verify Hot20 cases are object-backed")
+	}
+}
+
+func TestMinIOAssetSmokeBuildsCaseUploaderImage(t *testing.T) {
+	script, err := os.ReadFile("smoke-minio-assets.sh")
+	if err != nil {
+		t.Fatalf("read smoke script: %v", err)
+	}
+	if !strings.Contains(string(script), "docker compose --profile assets build case-uploader") {
+		t.Fatal("MinIO smoke should rebuild the case-uploader profile image before running it")
+	}
+}
+
+func TestCIWorkflowCoversMinIOObjectStoragePath(t *testing.T) {
+	workflow, err := os.ReadFile("../.github/workflows/ci.yml")
+	if err != nil {
+		t.Fatalf("read CI workflow: %v", err)
+	}
+	body := string(workflow)
+	for _, want := range []string{
+		"minio/minio:",
+		"TEST_MINIO_ENDPOINT:",
+		"./internal/objectstore",
+		"scripts/smoke-minio-assets.sh",
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("CI workflow missing %q", want)
+		}
+	}
+}
+
 func TestMain(m *testing.M) {
 	if err := os.Chdir("scripts"); err != nil {
 	}

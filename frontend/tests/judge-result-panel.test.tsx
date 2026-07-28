@@ -35,6 +35,7 @@ describe("JudgeResultPanel", () => {
     ["running", "Running"],
     ["accepted", "Accepted"],
     ["wrong_answer", "Wrong Answer"],
+    ["compile_error", "Compile Error"],
     ["runtime_error", "Runtime Error"],
     ["time_limit_exceeded", "Time Limit Exceeded"],
     ["internal_error", "Internal Error"],
