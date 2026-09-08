@@ -13,5 +13,6 @@ loadtest/results/*.json
 loadtest/results/*.csv
 loadtest/results/*.log
 loadtest/results/meta.txt
+loadtest/results/saturation-meta.txt
 !loadtest/results/.gitkeep
 docs/benchmarks/*.tmp

@@ -66,7 +66,7 @@ fault-test:
 smoke-minio-assets:
 	bash scripts/smoke-minio-assets.sh
 
-.PHONY: observability-config observability-up load-smoke load-baseline load-worker-scale
+.PHONY: observability-config observability-up load-smoke load-baseline load-worker-scale load-saturation
 
 observability-config:
 	docker compose config --quiet
@@ -89,3 +89,6 @@ load-baseline:
 
 load-worker-scale:
 	bash scripts/run-worker-scale-benchmark.sh
+
+load-saturation:
+	bash scripts/run-saturation-benchmark.sh

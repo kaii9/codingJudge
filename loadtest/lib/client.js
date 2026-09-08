@@ -11,11 +11,14 @@ export const submissionsCreated = new Counter('submissions_created');
 export const submissionsAccepted = new Counter('submissions_accepted');
 
 let authenticated = false;
+const runID = (__ENV.CJ_RUN_ID || Date.now().toString(36))
+  .replace(/[^A-Za-z0-9_-]/g, '')
+  .slice(0, 16);
 
 export function ensureAuthenticated() {
   if (authenticated) return true;
 
-  const username = `k6_${Date.now().toString(36)}_${__VU}`;
+  const username = `k6_${runID}_${__VU}`.slice(0, 32);
   const password = 'correct-password';
   const payload = JSON.stringify({ username, password });
   const params = { headers: { 'Content-Type': 'application/json' } };
@@ -49,7 +52,7 @@ export function createSubmission(problemId, language, code) {
   const res = http.post(`${BASE_URL}/submissions`, payload, {
     headers: {
       'Content-Type': 'application/json',
-      'Idempotency-Key': `k6-${__VU}-${__ITER}-${Date.now()}`,
+      'Idempotency-Key': `k6-${runID}-${__VU}-${__ITER}-${Date.now()}`,
     },
   });
   check(res, { 'create submission 202': (r) => r.status === 202 });
@@ -57,6 +60,7 @@ export function createSubmission(problemId, language, code) {
     logicalFailure.add(1);
     return null;
   }
+  logicalFailure.add(0);
   submissionsCreated.add(1);
   try {
     return res.json();
