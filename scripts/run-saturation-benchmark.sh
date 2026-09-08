@@ -13,6 +13,7 @@ SAT_BATCH_SIZE="${SAT_BATCH_SIZE:-60}"
 SAT_VUS="${SAT_VUS:-20}"
 SAT_MAX_DURATION="${SAT_MAX_DURATION:-30s}"
 SAT_DRAIN_TIMEOUT_SECONDS="${SAT_DRAIN_TIMEOUT_SECONDS:-180}"
+SAT_REPETITIONS="${SAT_REPETITIONS:-3}"
 BENCH_RATE_LIMIT="${BENCH_RATE_LIMIT:-100000}"
 BENCH_RATE_BURST="${BENCH_RATE_BURST:-1000}"
 
@@ -50,9 +51,11 @@ trap cleanup EXIT INT TERM
 case "$SAT_BATCH_SIZE" in ''|*[!0-9]*) die "SAT_BATCH_SIZE must be a positive integer" ;; esac
 case "$SAT_VUS" in ''|*[!0-9]*) die "SAT_VUS must be a positive integer" ;; esac
 case "$SAT_DRAIN_TIMEOUT_SECONDS" in ''|*[!0-9]*) die "SAT_DRAIN_TIMEOUT_SECONDS must be a positive integer" ;; esac
+case "$SAT_REPETITIONS" in ''|*[!0-9]*) die "SAT_REPETITIONS must be a positive integer" ;; esac
 [ "$SAT_BATCH_SIZE" -gt 0 ] || die "SAT_BATCH_SIZE must be greater than zero"
 [ "$SAT_VUS" -gt 0 ] || die "SAT_VUS must be greater than zero"
 [ "$SAT_DRAIN_TIMEOUT_SECONDS" -gt 0 ] || die "SAT_DRAIN_TIMEOUT_SECONDS must be greater than zero"
+[ "$SAT_REPETITIONS" -gt 0 ] || die "SAT_REPETITIONS must be greater than zero"
 command -v docker >/dev/null || die "docker is required"
 command -v jq >/dev/null || die "jq is required"
 
@@ -143,26 +146,32 @@ fi
   echo "language: python"
   echo "problem_id: echo"
   echo "worker_concurrency: 1"
-  echo "repetitions: 1"
+  echo "repetitions: $SAT_REPETITIONS"
 } > "$META"
 
-echo "workers,batch,accepted,makespan_seconds,throughput_per_second,http_p95_ms,peak_pending,peak_lag,peak_outstanding" > "$CSV"
+echo "trial,workers,batch,accepted,makespan_seconds,throughput_per_second,http_p95_ms,peak_pending,peak_lag,peak_outstanding" > "$CSV"
 
-for workers in 1 2 4; do
-  info "scaling to $workers worker(s) with benchmark admission limits..."
+run_round() {
+  local trial="$1" workers="$2"
+  local label="trial-$trial-worker-$workers"
+  local pre_pending pre_lag run_id summary log queue_log k6_exit
+  local total=0 accepted=0 terminal=0 makespan=0 drained=0 pending=0 lag=0
+  local peak_pending peak_lag peak_outstanding throughput http_p95
+
+  info "[$label] scaling to $workers worker(s) with benchmark admission limits..."
   SUBMISSION_RATE_LIMIT_PER_MINUTE="$BENCH_RATE_LIMIT" \
   SUBMISSION_RATE_LIMIT_BURST="$BENCH_RATE_BURST" \
     docker compose up -d --scale worker="$workers" --wait
 
   read -r pre_pending pre_lag < <(queue_stats)
   if [ "$pre_pending" -ne 0 ] || [ "$pre_lag" -ne 0 ]; then
-    die "worker-$workers: queue is not empty before the round (pending=$pre_pending, lag=$pre_lag)"
+    die "$label: queue is not empty before the round (pending=$pre_pending, lag=$pre_lag)"
   fi
 
-  run_id="satw${workers}$(date +%s)"
-  summary="$RESULTS/saturation-w${workers}.json"
-  log="$RESULTS/saturation-w${workers}.log"
-  queue_log="$RESULTS/saturation-queue-w${workers}.csv"
+  run_id="sat${trial}w${workers}$(date +%s)"
+  summary="$RESULTS/saturation-t${trial}-w${workers}.json"
+  log="$RESULTS/saturation-t${trial}-w${workers}.log"
+  queue_log="$RESULTS/saturation-queue-t${trial}-w${workers}.csv"
   rm -f "$summary" "$log"
   echo "timestamp,pending,lag,outstanding" > "$queue_log"
 
@@ -186,11 +195,11 @@ for workers in 1 2 4; do
     --env "CJ_ITERATIONS=$SAT_BATCH_SIZE" \
     --env "CJ_VUS=$SAT_VUS" \
     --env "CJ_MAX_DURATION=$SAT_MAX_DURATION" \
-    --summary-export="/results/saturation-w${workers}.json" 2>&1 | tee "$log"
+    --summary-export="/results/saturation-t${trial}-w${workers}.json" 2>&1 | tee "$log"
   k6_exit=${PIPESTATUS[0]}
   set -e
-  [ "$k6_exit" -eq 0 ] || die "worker-$workers: k6 exited with $k6_exit"
-  validate_summary "$summary" "worker-$workers"
+  [ "$k6_exit" -eq 0 ] || die "$label: k6 exited with $k6_exit"
+  validate_summary "$summary" "$label"
 
   info "waiting for all jobs in run $run_id to reach a terminal state..."
   terminal=0
@@ -202,12 +211,11 @@ for workers in 1 2 4; do
     sleep 1
   done
   if [ "$total" -ne "$SAT_BATCH_SIZE" ] || [ "$terminal" -ne "$SAT_BATCH_SIZE" ]; then
-    die "worker-$workers: drain timed out (total=$total, terminal=$terminal, expected=$SAT_BATCH_SIZE)"
+    die "$label: drain timed out (total=$total, terminal=$terminal, expected=$SAT_BATCH_SIZE)"
   fi
   [ "$accepted" -eq "$SAT_BATCH_SIZE" ] \
-    || die "worker-$workers: accepted=$accepted, expected $SAT_BATCH_SIZE"
+    || die "$label: accepted=$accepted, expected $SAT_BATCH_SIZE"
 
-  drained=0
   for _ in $(seq 1 20); do
     read -r pending lag < <(queue_stats)
     if [ "$pending" -eq 0 ] && [ "$lag" -eq 0 ]; then
@@ -217,21 +225,33 @@ for workers in 1 2 4; do
     sleep 1
   done
   [ "$drained" -eq 1 ] \
-    || die "worker-$workers: database is terminal but queue did not drain (pending=$pending, lag=$lag)"
+    || die "$label: database is terminal but queue did not drain (pending=$pending, lag=$lag)"
 
   stop_capture
   peak_pending=$(awk -F',' 'NR > 1 && $2 + 0 > max {max = $2 + 0} END {print max + 0}' "$queue_log")
   peak_lag=$(awk -F',' 'NR > 1 && $3 + 0 > max {max = $3 + 0} END {print max + 0}' "$queue_log")
   peak_outstanding=$(awk -F',' 'NR > 1 && $4 + 0 > max {max = $4 + 0} END {print max + 0}' "$queue_log")
   [ "$peak_lag" -gt 0 ] \
-    || die "worker-$workers: no Stream lag was observed; increase SAT_BATCH_SIZE"
+    || die "$label: no Stream lag was observed; increase SAT_BATCH_SIZE"
   awk -v value="$makespan" 'BEGIN {exit !(value > 0)}' \
-    || die "worker-$workers: invalid makespan $makespan"
+    || die "$label: invalid makespan $makespan"
 
   throughput=$(awk -v batch="$SAT_BATCH_SIZE" -v seconds="$makespan" 'BEGIN {printf "%.6f", batch / seconds}')
   http_p95=$(jq -r '.metrics.http_req_duration["p(95)"] // 0' "$summary")
-  echo "$workers,$total,$accepted,$makespan,$throughput,$http_p95,$peak_pending,$peak_lag,$peak_outstanding" >> "$CSV"
-  info "worker-$workers complete: ${throughput}/s, makespan=${makespan}s, peak backlog=$peak_outstanding"
+  echo "$trial,$workers,$total,$accepted,$makespan,$throughput,$http_p95,$peak_pending,$peak_lag,$peak_outstanding" >> "$CSV"
+  info "[$label] complete: ${throughput}/s, makespan=${makespan}s, peak backlog=$peak_outstanding"
+}
+
+for trial in $(seq 1 "$SAT_REPETITIONS"); do
+  case $(((trial - 1) % 3)) in
+    0) order="1 2 4" ;;
+    1) order="4 1 2" ;;
+    2) order="2 4 1" ;;
+  esac
+  info "trial $trial/$SAT_REPETITIONS uses worker order: $order"
+  for workers in $order; do
+    run_round "$trial" "$workers"
+  done
 done
 
 info "rendering the validated benchmark report..."
