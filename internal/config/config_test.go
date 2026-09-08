@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kai/codingjudge/internal/config"
+	"github.com/kaii9/codingJudge/internal/config"
 )
 
 func TestLoadUsesMemoryDefaults(t *testing.T) {
@@ -21,6 +21,42 @@ func TestLoadUsesMemoryDefaults(t *testing.T) {
 	}
 	if cfg.QueueMode != config.QueueMemory {
 		t.Fatalf("QueueMode = %q, want %q", cfg.QueueMode, config.QueueMemory)
+	}
+	if cfg.SubmissionRateLimitPerMinute != 10 || cfg.SubmissionRateLimitBurst != 3 {
+		t.Fatalf("submission rate limit = %d/min burst %d, want 10/min burst 3", cfg.SubmissionRateLimitPerMinute, cfg.SubmissionRateLimitBurst)
+	}
+}
+
+func TestLoadReadsSubmissionRateLimit(t *testing.T) {
+	t.Parallel()
+	cfg := config.Load(func(key string) string {
+		switch key {
+		case "SUBMISSION_RATE_LIMIT_PER_MINUTE":
+			return "120"
+		case "SUBMISSION_RATE_LIMIT_BURST":
+			return "8"
+		default:
+			return ""
+		}
+	})
+	if err := config.ValidateAPI(cfg); err != nil {
+		t.Fatal(err)
+	}
+	if cfg.SubmissionRateLimitPerMinute != 120 || cfg.SubmissionRateLimitBurst != 8 {
+		t.Fatalf("submission rate limit = %d/min burst %d", cfg.SubmissionRateLimitPerMinute, cfg.SubmissionRateLimitBurst)
+	}
+}
+
+func TestValidateAPIRejectsInvalidSubmissionRateLimit(t *testing.T) {
+	t.Parallel()
+	cfg := config.Load(func(key string) string {
+		if key == "SUBMISSION_RATE_LIMIT_PER_MINUTE" {
+			return "invalid"
+		}
+		return ""
+	})
+	if err := config.ValidateAPI(cfg); err == nil {
+		t.Fatal("ValidateAPI should reject malformed submission rate limit")
 	}
 }
 
@@ -42,6 +78,20 @@ func TestLoadEnablesPostgresAndRedisWhenConfigured(t *testing.T) {
 	}
 	if cfg.QueueMode != config.QueueRedisStreams {
 		t.Fatalf("QueueMode = %q, want %q", cfg.QueueMode, config.QueueRedisStreams)
+	}
+}
+
+func TestLoadReadsSecureCookieSetting(t *testing.T) {
+	t.Parallel()
+
+	cfg := config.Load(func(key string) string {
+		if key == "COOKIE_SECURE" {
+			return "true"
+		}
+		return ""
+	})
+	if !cfg.CookieSecure {
+		t.Fatal("CookieSecure = false, want true")
 	}
 }
 

@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/kai/codingjudge/internal/httpapi"
+	"github.com/kaii9/codingJudge/internal/httpapi"
 )
 
 func TestAccessLogRecordsRequestMetadata(t *testing.T) {

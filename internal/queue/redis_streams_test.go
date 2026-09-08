@@ -5,7 +5,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/kai/codingjudge/internal/domain"
+	"github.com/kaii9/codingJudge/internal/domain"
 )
 
 type fakeQueueMetrics struct {

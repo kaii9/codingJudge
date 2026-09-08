@@ -158,6 +158,7 @@ func main() {
 	fmt.Println("| --- | --- |")
 	for _, kv := range [][2]string{
 		{"Git commit", meta["git_commit"]},
+		{"Git tree", meta["git_tree"]},
 		{"OS", meta["os"]},
 		{"Architecture", meta["arch"]},
 		{"Logical CPUs", meta["logical_cpus"]},
@@ -205,6 +206,12 @@ func main() {
 	fmt.Println("- Pending returns to 0 after each round, confirming the queue drains under the tested load.")
 	fmt.Println("- Peak Pending values are sampled every 5 seconds during the run and represent the highest observed value.")
 	fmt.Println("- This is NOT a saturation or maximum-throughput benchmark; it compares latency at fixed load.")
+	if rows[1].judgeP95 <= rows[4].judgeP95*1.2 {
+		fmt.Println("- At this offered rate, one worker was not saturated; similar 1/2/4-worker P95 values demonstrate stability, not a scaling gain.")
+	} else {
+		improvement := (rows[1].judgeP95 - rows[4].judgeP95) / rows[1].judgeP95 * 100
+		fmt.Printf("- Four workers reduced judge P95 by %.1f%% versus one worker under this fixed load.\n", improvement)
+	}
 	fmt.Println("- This benchmark uses Python submissions only; Go and C++ require Linux native Docker for reliable timing.")
 }
 

@@ -2,8 +2,10 @@ package httpapi
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"regexp"
@@ -12,21 +14,26 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/kai/codingjudge/internal/auth"
-	"github.com/kai/codingjudge/internal/domain"
-	"github.com/kai/codingjudge/internal/store"
+	"github.com/kaii9/codingJudge/internal/auth"
+	"github.com/kaii9/codingJudge/internal/domain"
+	"github.com/kaii9/codingJudge/internal/ratelimit"
+	"github.com/kaii9/codingJudge/internal/store"
 )
 
 const MaxCodeBytes = 64 * 1024
 const sessionCookieName = "gojudge_session"
 const sessionTTL = 7 * 24 * time.Hour
+const readinessTimeout = 2 * time.Second
 
 var usernamePattern = regexp.MustCompile(`^[A-Za-z0-9_-]{3,32}$`)
+var idempotencyKeyPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$`)
 
 type ProblemStore interface {
 	ListProblems(context.Context) ([]domain.Problem, error)
 	GetProblem(context.Context, string) (domain.Problem, bool, error)
 	CreateSubmission(context.Context, domain.Submission) (domain.Submission, error)
+	CreateSubmissionIdempotent(context.Context, domain.Submission, string, string) (domain.Submission, bool, error)
+	FindSubmissionByIdempotencyKey(context.Context, string, string) (domain.Submission, string, bool, error)
 	ListSubmissions(context.Context) ([]domain.Submission, error)
 	GetSubmission(context.Context, string) (domain.Submission, bool, error)
 	CreateUser(context.Context, string, string) (domain.User, error)
@@ -46,12 +53,21 @@ type ObjectGetter interface {
 }
 
 type Server struct {
-	store             ProblemStore
-	router            http.Handler
-	objects           ObjectGetter
-	metricsHandler    http.Handler
-	httpMetrics       HTTPMetrics
-	submissionMetrics SubmissionMetrics
+	store                    ProblemStore
+	router                   http.Handler
+	objects                  ObjectGetter
+	metricsHandler           http.Handler
+	httpMetrics              HTTPMetrics
+	submissionMetrics        SubmissionMetrics
+	submissionControlMetrics SubmissionControlMetrics
+	submissionLimiter        ratelimit.Limiter
+	readinessChecks          []readinessCheck
+	secureCookies            bool
+}
+
+type readinessCheck struct {
+	name  string
+	check func(context.Context) error
 }
 
 // HTTPMetrics records HTTP-level observations.
@@ -62,6 +78,12 @@ type HTTPMetrics interface {
 // SubmissionMetrics records submission creation events.
 type SubmissionMetrics interface {
 	SubmissionCreated(language string)
+}
+
+// SubmissionControlMetrics records low-cardinality idempotency and limiting outcomes.
+type SubmissionControlMetrics interface {
+	SubmissionIdempotency(result string)
+	SubmissionRateLimited()
 }
 
 // Option configures a Server.
@@ -89,9 +111,35 @@ func WithSubmissionMetrics(m SubmissionMetrics) Option {
 	}
 }
 
+func WithSubmissionControlMetrics(m SubmissionControlMetrics) Option {
+	return func(s *Server) {
+		s.submissionControlMetrics = m
+	}
+}
+
+func WithSubmissionLimiter(limiter ratelimit.Limiter) Option {
+	return func(s *Server) {
+		s.submissionLimiter = limiter
+	}
+}
+
 func WithObjectGetter(objects ObjectGetter) Option {
 	return func(s *Server) {
 		s.objects = objects
+	}
+}
+
+func WithReadinessCheck(name string, check func(context.Context) error) Option {
+	return func(s *Server) {
+		if strings.TrimSpace(name) != "" && check != nil {
+			s.readinessChecks = append(s.readinessChecks, readinessCheck{name: name, check: check})
+		}
+	}
+}
+
+func WithSecureCookies(enabled bool) Option {
+	return func(s *Server) {
+		s.secureCookies = enabled
 	}
 }
 
@@ -107,6 +155,7 @@ func NewServer(store ProblemStore, options ...Option) *Server {
 	r.Get("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 	})
+	r.Get("/readyz", s.ready)
 	if s.metricsHandler != nil {
 		r.Get("/metrics", func(w http.ResponseWriter, r *http.Request) {
 			s.metricsHandler.ServeHTTP(w, r)
@@ -129,6 +178,21 @@ func NewServer(store ProblemStore, options ...Option) *Server {
 	})
 	s.router = r
 	return s
+}
+
+func (s *Server) ready(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), readinessTimeout)
+	defer cancel()
+	for _, item := range s.readinessChecks {
+		if err := item.check(ctx); err != nil {
+			writeJSON(w, http.StatusServiceUnavailable, map[string]string{
+				"status":    "not_ready",
+				"component": item.name,
+			})
+			return
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ready"})
 }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -199,7 +263,7 @@ func (s *Server) logout(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	clearSessionCookie(w)
+	s.clearSessionCookie(w)
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -257,7 +321,11 @@ func (s *Server) createSubmission(w http.ResponseWriter, r *http.Request) {
 		writeErrorCode(w, http.StatusUnauthorized, "unauthenticated", "login required")
 		return
 	}
-
+	idempotencyKey := strings.TrimSpace(r.Header.Get("Idempotency-Key"))
+	if idempotencyKey != "" && !idempotencyKeyPattern.MatchString(idempotencyKey) {
+		writeErrorCode(w, http.StatusBadRequest, "invalid_idempotency_key", "Idempotency-Key must be 1-128 characters using letters, digits, '.', '_', ':' or '-'")
+		return
+	}
 	r.Body = http.MaxBytesReader(w, r.Body, MaxCodeBytes+1024)
 	var req struct {
 		ProblemID string          `json:"problemId"`
@@ -291,22 +359,93 @@ func (s *Server) createSubmission(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "problem not found")
 		return
 	}
-
-	sub, err := s.store.CreateSubmission(r.Context(), domain.Submission{
+	requestHash := submissionRequestHash(req.ProblemID, req.Language, req.Code)
+	if idempotencyKey != "" {
+		existing, existingHash, found, err := s.store.FindSubmissionByIdempotencyKey(r.Context(), user.ID, idempotencyKey)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "find idempotent submission")
+			return
+		}
+		if found {
+			if existingHash != requestHash {
+				s.recordIdempotency("conflict")
+				writeErrorCode(w, http.StatusConflict, "idempotency_conflict", "Idempotency-Key was already used with a different submission")
+				return
+			}
+			s.recordIdempotency("replayed")
+			w.Header().Set("Idempotency-Replayed", "true")
+			existing.Code = ""
+			writeJSON(w, http.StatusAccepted, existing)
+			return
+		}
+	}
+	// A replay creates no judge work, so it bypasses the new-submission quota.
+	// General HTTP flood protection belongs at the edge or in separate middleware.
+	if s.submissionLimiter != nil {
+		decision, err := s.submissionLimiter.Allow(r.Context(), user.ID)
+		if err != nil {
+			writeErrorCode(w, http.StatusServiceUnavailable, "rate_limit_unavailable", "submission rate limiter is unavailable")
+			return
+		}
+		writeRateLimitHeaders(w.Header(), decision)
+		if !decision.Allowed {
+			if s.submissionControlMetrics != nil {
+				s.submissionControlMetrics.SubmissionRateLimited()
+			}
+			writeErrorCode(w, http.StatusTooManyRequests, "rate_limited", "submission rate limit exceeded")
+			return
+		}
+	}
+	sub, replayed, err := s.store.CreateSubmissionIdempotent(r.Context(), domain.Submission{
 		UserID:    user.ID,
 		ProblemID: req.ProblemID,
 		Language:  req.Language,
 		Code:      req.Code,
-	})
+	}, idempotencyKey, requestHash)
 	if err != nil {
+		if errors.Is(err, store.ErrIdempotencyConflict) {
+			s.recordIdempotency("conflict")
+			writeErrorCode(w, http.StatusConflict, "idempotency_conflict", "Idempotency-Key was already used with a different submission")
+			return
+		}
 		writeError(w, http.StatusInternalServerError, "create submission")
 		return
 	}
-	if s.submissionMetrics != nil {
+	if replayed {
+		s.recordIdempotency("replayed")
+		w.Header().Set("Idempotency-Replayed", "true")
+	} else if s.submissionMetrics != nil {
 		s.submissionMetrics.SubmissionCreated(string(req.Language))
+	}
+	if idempotencyKey != "" && !replayed {
+		s.recordIdempotency("created")
 	}
 	sub.Code = ""
 	writeJSON(w, http.StatusAccepted, sub)
+}
+
+func submissionRequestHash(problemID string, language domain.Language, code string) string {
+	payload, _ := json.Marshal(struct {
+		ProblemID string          `json:"problemId"`
+		Language  domain.Language `json:"language"`
+		Code      string          `json:"code"`
+	}{ProblemID: problemID, Language: language, Code: code})
+	return fmt.Sprintf("%x", sha256.Sum256(payload))
+}
+
+func writeRateLimitHeaders(header http.Header, decision ratelimit.Decision) {
+	header.Set("RateLimit-Limit", strconv.Itoa(decision.Limit))
+	header.Set("RateLimit-Remaining", strconv.Itoa(max(decision.Remaining, 0)))
+	if !decision.Allowed {
+		seconds := max(1, int((decision.RetryAfter+time.Second-1)/time.Second))
+		header.Set("Retry-After", strconv.Itoa(seconds))
+	}
+}
+
+func (s *Server) recordIdempotency(result string) {
+	if s.submissionControlMetrics != nil {
+		s.submissionControlMetrics.SubmissionIdempotency(result)
+	}
 }
 
 func (s *Server) listSubmissions(w http.ResponseWriter, r *http.Request) {
@@ -491,11 +630,12 @@ func (s *Server) issueSession(w http.ResponseWriter, r *http.Request, userID str
 		MaxAge:   int(sessionTTL.Seconds()),
 		HttpOnly: true,
 		SameSite: http.SameSiteLaxMode,
+		Secure:   s.secureCookies,
 	})
 	return nil
 }
 
-func clearSessionCookie(w http.ResponseWriter) {
+func (s *Server) clearSessionCookie(w http.ResponseWriter) {
 	http.SetCookie(w, &http.Cookie{
 		Name:     sessionCookieName,
 		Value:    "",
@@ -503,6 +643,7 @@ func clearSessionCookie(w http.ResponseWriter) {
 		MaxAge:   -1,
 		HttpOnly: true,
 		SameSite: http.SameSiteLaxMode,
+		Secure:   s.secureCookies,
 	})
 }
 

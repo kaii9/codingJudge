@@ -3,13 +3,13 @@ package store
 import (
 	"context"
 	"errors"
-	"fmt"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/kai/codingjudge/internal/domain"
+	"github.com/kaii9/codingJudge/internal/domain"
 )
 
 type PostgresStore struct {
@@ -32,10 +32,14 @@ func (s *PostgresStore) Close() {
 	s.pool.Close()
 }
 
+func (s *PostgresStore) Ping(ctx context.Context) error {
+	return s.pool.Ping(ctx)
+}
+
 func (s *PostgresStore) CreateUser(ctx context.Context, username, passwordHash string) (domain.User, error) {
 	now := time.Now().UTC()
 	user := domain.User{
-		ID:        fmt.Sprintf("user-%d", now.UnixNano()),
+		ID:        "user-" + uuid.NewString(),
 		Username:  username,
 		CreatedAt: now,
 	}
@@ -221,32 +225,89 @@ func (s *PostgresStore) GetProblem(ctx context.Context, id string) (domain.Probl
 }
 
 func (s *PostgresStore) CreateSubmission(ctx context.Context, sub domain.Submission) (domain.Submission, error) {
+	created, _, err := s.CreateSubmissionIdempotent(ctx, sub, "", "")
+	return created, err
+}
+
+func (s *PostgresStore) CreateSubmissionIdempotent(ctx context.Context, sub domain.Submission, idempotencyKey, requestHash string) (domain.Submission, bool, error) {
+	if idempotencyKey == "" {
+		requestHash = ""
+	}
 	now := time.Now().UTC()
-	sub.ID = fmt.Sprintf("sub-%d", now.UnixNano())
+	sub.ID = "sub-" + uuid.NewString()
 	sub.Status = domain.StatusQueued
 	sub.CreatedAt = now
 	sub.UpdatedAt = now
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
-		return domain.Submission{}, err
+		return domain.Submission{}, false, err
 	}
 	defer tx.Rollback(ctx)
-	if _, err = tx.Exec(ctx, `
-		INSERT INTO submissions (id, user_id, problem_id, language, code, status, created_at, updated_at)
-		VALUES ($1, NULLIF($2, ''), $3, $4, $5, $6, $7, $8)
-	`, sub.ID, sub.UserID, sub.ProblemID, sub.Language, sub.Code, sub.Status, sub.CreatedAt, sub.UpdatedAt); err != nil {
-		return domain.Submission{}, err
+	result, err := tx.Exec(ctx, `
+		INSERT INTO submissions
+		    (id, user_id, problem_id, language, code, status, created_at, updated_at,
+		     idempotency_key, idempotency_request_hash)
+		VALUES ($1, NULLIF($2, ''), $3, $4, $5, $6, $7, $8, NULLIF($9, ''), NULLIF($10, ''))
+		ON CONFLICT (user_id, idempotency_key)
+		    WHERE user_id IS NOT NULL AND idempotency_key IS NOT NULL
+		DO NOTHING
+	`, sub.ID, sub.UserID, sub.ProblemID, sub.Language, sub.Code, sub.Status, sub.CreatedAt, sub.UpdatedAt, idempotencyKey, requestHash)
+	if err != nil {
+		return domain.Submission{}, false, err
+	}
+	if result.RowsAffected() == 0 {
+		var existingID, existingHash string
+		if err := tx.QueryRow(ctx, `
+			SELECT id, idempotency_request_hash
+			FROM submissions
+			WHERE user_id = $1 AND idempotency_key = $2
+		`, sub.UserID, idempotencyKey).Scan(&existingID, &existingHash); err != nil {
+			return domain.Submission{}, false, err
+		}
+		if existingHash != requestHash {
+			return domain.Submission{}, false, ErrIdempotencyConflict
+		}
+		existing, err := scanSubmission(tx.QueryRow(ctx, `
+			SELECT id, COALESCE(user_id, ''), problem_id, language, code, status,
+			       stdout, stderr, exit_code, duration_ms, created_at, updated_at
+			FROM submissions
+			WHERE id = $1
+		`, existingID))
+		if err != nil {
+			return domain.Submission{}, false, err
+		}
+		if err := tx.Commit(ctx); err != nil {
+			return domain.Submission{}, false, err
+		}
+		return existing, true, nil
 	}
 	if _, err = tx.Exec(ctx, `
 		INSERT INTO judge_outbox (submission_id)
 		VALUES ($1)
 	`, sub.ID); err != nil {
-		return domain.Submission{}, err
+		return domain.Submission{}, false, err
 	}
 	if err := tx.Commit(ctx); err != nil {
-		return domain.Submission{}, err
+		return domain.Submission{}, false, err
 	}
-	return sub, nil
+	return sub, false, nil
+}
+
+func (s *PostgresStore) FindSubmissionByIdempotencyKey(ctx context.Context, userID, idempotencyKey string) (domain.Submission, string, bool, error) {
+	var submissionID, requestHash string
+	err := s.pool.QueryRow(ctx, `
+		SELECT id, idempotency_request_hash
+		FROM submissions
+		WHERE user_id = $1 AND idempotency_key = $2
+	`, userID, idempotencyKey).Scan(&submissionID, &requestHash)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return domain.Submission{}, "", false, nil
+		}
+		return domain.Submission{}, "", false, err
+	}
+	sub, ok, err := s.GetSubmissionForUser(ctx, submissionID, userID)
+	return sub, requestHash, ok, err
 }
 
 func (s *PostgresStore) ReplaceProblemTestCases(ctx context.Context, problemID string, cases []domain.TestCase) error {

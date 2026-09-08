@@ -6,7 +6,7 @@ import (
 	"encoding/hex"
 	"fmt"
 
-	"github.com/kai/codingjudge/internal/domain"
+	"github.com/kaii9/codingJudge/internal/domain"
 )
 
 type ObjectGetter interface {

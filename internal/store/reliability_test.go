@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kai/codingjudge/internal/domain"
-	"github.com/kai/codingjudge/internal/store"
+	"github.com/kaii9/codingJudge/internal/domain"
+	"github.com/kaii9/codingJudge/internal/store"
 )
 
 func TestMemoryClaimLeaseAndFenceStaleWorker(t *testing.T) {

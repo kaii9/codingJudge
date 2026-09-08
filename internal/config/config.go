@@ -23,21 +23,26 @@ const (
 )
 
 type Config struct {
-	APIAddr        string
-	DatabaseURL    string
-	RedisAddr      string
-	StorageMode    StorageMode
-	QueueMode      QueueMode
-	MinIOEndpoint  string
-	MinIOAccessKey string
-	MinIOSecretKey string
-	MinIOBucket    string
-	MinIOUseSSL    bool
+	APIAddr                      string
+	DatabaseURL                  string
+	RedisAddr                    string
+	StorageMode                  StorageMode
+	QueueMode                    QueueMode
+	MinIOEndpoint                string
+	MinIOAccessKey               string
+	MinIOSecretKey               string
+	MinIOBucket                  string
+	MinIOUseSSL                  bool
+	CookieSecure                 bool
+	SubmissionRateLimitPerMinute int
+	SubmissionRateLimitBurst     int
 }
 
 func Load(getenv func(string) string) Config {
 	cfg := Config{
-		APIAddr: ":8080",
+		APIAddr:                      ":8080",
+		SubmissionRateLimitPerMinute: 10,
+		SubmissionRateLimitBurst:     3,
 	}
 	if value := getenv("API_ADDR"); value != "" {
 		cfg.APIAddr = value
@@ -53,6 +58,15 @@ func Load(getenv func(string) string) Config {
 	}
 	if value := getenv("MINIO_USE_SSL"); value != "" {
 		cfg.MinIOUseSSL, _ = strconv.ParseBool(value)
+	}
+	if value := getenv("COOKIE_SECURE"); value != "" {
+		cfg.CookieSecure, _ = strconv.ParseBool(value)
+	}
+	if value := getenv("SUBMISSION_RATE_LIMIT_PER_MINUTE"); value != "" {
+		cfg.SubmissionRateLimitPerMinute, _ = strconv.Atoi(value)
+	}
+	if value := getenv("SUBMISSION_RATE_LIMIT_BURST"); value != "" {
+		cfg.SubmissionRateLimitBurst, _ = strconv.Atoi(value)
 	}
 
 	if cfg.DatabaseURL != "" {
@@ -93,6 +107,12 @@ func ValidateAPI(cfg Config) error {
 	}
 	if err := validateMinIOValues(cfg.MinIOEndpoint, cfg.MinIOAccessKey, cfg.MinIOSecretKey); err != nil {
 		return err
+	}
+	if cfg.SubmissionRateLimitPerMinute < 1 {
+		return fmt.Errorf("SUBMISSION_RATE_LIMIT_PER_MINUTE must be a positive integer")
+	}
+	if cfg.SubmissionRateLimitBurst < 1 {
+		return fmt.Errorf("SUBMISSION_RATE_LIMIT_BURST must be a positive integer")
 	}
 	return nil
 }

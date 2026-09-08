@@ -36,11 +36,18 @@ DOCKER_VERSION=$(docker version --format '{{.Server.Version}}' 2>/dev/null || ec
 MEMORY=$(sysctl -n hw.memsize 2>/dev/null | awk '{printf "%.0f GB", $1/1024/1024/1024}' || echo unknown)
 K6_VERSION=$(docker compose --profile loadtest run --rm --entrypoint k6 k6 version 2>/dev/null | head -1 | sed 's/.*k6 v//' | awk '{print $1}' || echo unknown)
 JUDGE_IMAGES="golang:1.25-alpine, python:3.12-alpine, gcc:13"
+GIT_TREE_STATE="dirty"
+if git -C "$ROOT" diff --quiet \
+  && git -C "$ROOT" diff --cached --quiet \
+  && [ -z "$(git -C "$ROOT" ls-files --others --exclude-standard)" ]; then
+  GIT_TREE_STATE="clean"
+fi
 
 info "recording machine metadata..."
 {
   echo "date: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
   echo "git_commit: $(git -C "$ROOT" rev-parse --short HEAD)"
+  echo "git_tree: ${GIT_TREE_STATE}"
   echo "os: $(uname -s)"
   echo "arch: $(uname -m)"
   echo "logical_cpus: $(nproc 2>/dev/null || sysctl -n hw.logicalcpu 2>/dev/null || echo unknown)"
@@ -69,6 +76,8 @@ CJ_PREALLOCATED_VUS="${CJ_PREALLOCATED_VUS:-20}"
 CJ_MAX_VUS="${CJ_MAX_VUS:-30}"
 CJ_DURATION="${CJ_DURATION:-2m}"
 CJ_TIMEOUT="${CJ_TIMEOUT:-120}"
+BENCH_RATE_LIMIT="${BENCH_RATE_LIMIT:-100000}"
+BENCH_RATE_BURST="${BENCH_RATE_BURST:-1000}"
 
 K6_ARGS="--env CJ_RATE=$CJ_RATE --env CJ_PREALLOCATED_VUS=$CJ_PREALLOCATED_VUS --env CJ_MAX_VUS=$CJ_MAX_VUS --env CJ_DURATION=$CJ_DURATION --env CJ_JUDGE_TIMEOUT_SECONDS=$CJ_TIMEOUT"
 
@@ -91,6 +100,7 @@ REQUIRED_METRICS="http_reqs http_req_duration http_req_failed submissions_create
   echo "judge_timeout_seconds: ${CJ_TIMEOUT}"
   echo "scenario: ${SCENARIO}"
   echo "worker_concurrency: 1"
+  echo "api_submission_rate_limit: ${BENCH_RATE_LIMIT}/min burst ${BENCH_RATE_BURST}"
 } >> "$RESULTS/meta.txt"
 
 validate_summary() {
@@ -133,7 +143,8 @@ for workers in 1 2 4; do
   fi
 
   info "=== scaling to $workers worker(s) ==="
-  docker compose up -d --scale worker=$workers --wait
+  SUBMISSION_RATE_LIMIT_PER_MINUTE="$BENCH_RATE_LIMIT" SUBMISSION_RATE_LIMIT_BURST="$BENCH_RATE_BURST" \
+    docker compose up -d --scale worker=$workers --wait
 
   info "waiting for $workers healthy worker target(s)..."
   found=0

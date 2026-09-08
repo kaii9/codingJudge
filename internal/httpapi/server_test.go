@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -12,16 +13,59 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kai/codingjudge/internal/auth"
-	"github.com/kai/codingjudge/internal/domain"
-	"github.com/kai/codingjudge/internal/httpapi"
-	"github.com/kai/codingjudge/internal/store"
+	"github.com/kaii9/codingJudge/internal/auth"
+	"github.com/kaii9/codingJudge/internal/domain"
+	"github.com/kaii9/codingJudge/internal/httpapi"
+	"github.com/kaii9/codingJudge/internal/ratelimit"
+	"github.com/kaii9/codingJudge/internal/store"
 )
 
 // fakeSubmissionMetrics records SubmissionCreated calls for testing.
 type fakeSubmissionMetrics struct {
 	mu        sync.Mutex
 	languages []string
+}
+
+type fakeSubmissionControlMetrics struct {
+	mu          sync.Mutex
+	idempotency []string
+	rateLimited int
+}
+
+func (f *fakeSubmissionControlMetrics) SubmissionIdempotency(result string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.idempotency = append(f.idempotency, result)
+}
+
+func (f *fakeSubmissionControlMetrics) SubmissionRateLimited() {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.rateLimited++
+}
+
+type fakeSubmissionLimiter struct {
+	mu        sync.Mutex
+	decisions []ratelimit.Decision
+	err       error
+	calls     int
+}
+
+func (f *fakeSubmissionLimiter) Allow(context.Context, string) (ratelimit.Decision, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.calls++
+	if f.err != nil {
+		return ratelimit.Decision{}, f.err
+	}
+	if len(f.decisions) == 0 {
+		return ratelimit.Decision{Allowed: true, Limit: 10, Remaining: 9}, nil
+	}
+	decision := f.decisions[0]
+	if len(f.decisions) > 1 {
+		f.decisions = f.decisions[1:]
+	}
+	return decision, nil
 }
 
 func (f *fakeSubmissionMetrics) SubmissionCreated(language string) {
@@ -59,6 +103,62 @@ func TestHealthz(t *testing.T) {
 	}
 	if body["status"] != "ok" {
 		t.Fatalf("status body = %q, want ok", body["status"])
+	}
+}
+
+func TestReadyzReportsDependencyFailure(t *testing.T) {
+	t.Parallel()
+
+	server := httpapi.NewServer(
+		store.NewMemoryStore(testProblems()),
+		httpapi.WithReadinessCheck("redis", func(context.Context) error {
+			return context.DeadlineExceeded
+		}),
+	)
+	req := httptest.NewRequest(http.MethodGet, "/readyz", nil)
+	rec := httptest.NewRecorder()
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusServiceUnavailable)
+	}
+	var body map[string]string
+	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	if body["status"] != "not_ready" || body["component"] != "redis" {
+		t.Fatalf("body = %#v", body)
+	}
+}
+
+func TestReadyzSucceedsWhenDependenciesAreHealthy(t *testing.T) {
+	t.Parallel()
+
+	server := httpapi.NewServer(
+		store.NewMemoryStore(testProblems()),
+		httpapi.WithReadinessCheck("store", func(context.Context) error { return nil }),
+	)
+	req := httptest.NewRequest(http.MethodGet, "/readyz", nil)
+	rec := httptest.NewRecorder()
+	server.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+}
+
+func TestSecureCookieOptionAppliesToSessionCookies(t *testing.T) {
+	t.Parallel()
+
+	server := httpapi.NewServer(store.NewMemoryStore(testProblems()), httpapi.WithSecureCookies(true))
+	req := httptest.NewRequest(http.MethodPost, "/auth/register", strings.NewReader(`{"username":"secure_user","password":"correct-password"}`))
+	rec := httptest.NewRecorder()
+	server.ServeHTTP(rec, req)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
+	}
+	cookies := rec.Result().Cookies()
+	if len(cookies) != 1 || !cookies[0].Secure {
+		t.Fatalf("cookies = %+v, want Secure session cookie", cookies)
 	}
 }
 
@@ -126,6 +226,146 @@ func TestCreateSubmissionPersistsQueuedSubmission(t *testing.T) {
 	}
 	if stored.UserID != created.UserID {
 		t.Fatalf("stored user id = %q, want %q", stored.UserID, created.UserID)
+	}
+}
+
+func TestCreateSubmissionReplaysIdempotentRequestWithoutConsumingAnotherToken(t *testing.T) {
+	t.Parallel()
+
+	st := store.NewMemoryStore(testProblems())
+	limiter := &fakeSubmissionLimiter{decisions: []ratelimit.Decision{
+		{Allowed: true, Limit: 10, Remaining: 2},
+		{Allowed: false, Limit: 10, RetryAfter: 6 * time.Second},
+	}}
+	controlMetrics := &fakeSubmissionControlMetrics{}
+	server := httpapi.NewServer(st,
+		httpapi.WithSubmissionLimiter(limiter),
+		httpapi.WithSubmissionControlMetrics(controlMetrics),
+	)
+	cookie := registerTestUser(t, server, "idempotent_user")
+	payload := []byte(`{"problemId":"sum","language":"go","code":"package main\nfunc main(){}"}`)
+
+	create := func() *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodPost, "/submissions", bytes.NewReader(payload))
+		req.AddCookie(cookie)
+		req.Header.Set("Idempotency-Key", "attempt-123")
+		rec := httptest.NewRecorder()
+		server.ServeHTTP(rec, req)
+		return rec
+	}
+	first := create()
+	second := create()
+	if first.Code != http.StatusAccepted || second.Code != http.StatusAccepted {
+		t.Fatalf("statuses = %d, %d; bodies=%s / %s", first.Code, second.Code, first.Body.String(), second.Body.String())
+	}
+	var firstSub, secondSub domain.Submission
+	if err := json.NewDecoder(first.Body).Decode(&firstSub); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.NewDecoder(second.Body).Decode(&secondSub); err != nil {
+		t.Fatal(err)
+	}
+	if firstSub.ID != secondSub.ID || second.Header().Get("Idempotency-Replayed") != "true" {
+		t.Fatalf("first=%+v second=%+v replay=%q", firstSub, secondSub, second.Header().Get("Idempotency-Replayed"))
+	}
+	limiter.mu.Lock()
+	if limiter.calls != 1 {
+		t.Fatalf("limiter calls = %d, want 1", limiter.calls)
+	}
+	limiter.mu.Unlock()
+	submissions, err := st.ListSubmissions(context.Background())
+	if err != nil || len(submissions) != 1 {
+		t.Fatalf("submissions=%+v err=%v, want one", submissions, err)
+	}
+	controlMetrics.mu.Lock()
+	defer controlMetrics.mu.Unlock()
+	if strings.Join(controlMetrics.idempotency, ",") != "created,replayed" {
+		t.Fatalf("idempotency metrics = %v", controlMetrics.idempotency)
+	}
+}
+
+func TestCreateSubmissionRejectsIdempotencyKeyReuseWithDifferentPayload(t *testing.T) {
+	t.Parallel()
+	st := store.NewMemoryStore(testProblems())
+	server := httpapi.NewServer(st)
+	cookie := registerTestUser(t, server, "conflict_user")
+
+	first := httptest.NewRequest(http.MethodPost, "/submissions", strings.NewReader(`{"problemId":"sum","language":"go","code":"first"}`))
+	first.AddCookie(cookie)
+	first.Header.Set("Idempotency-Key", "same-key")
+	firstRec := httptest.NewRecorder()
+	server.ServeHTTP(firstRec, first)
+	if firstRec.Code != http.StatusAccepted {
+		t.Fatalf("first status=%d body=%s", firstRec.Code, firstRec.Body.String())
+	}
+
+	second := httptest.NewRequest(http.MethodPost, "/submissions", strings.NewReader(`{"problemId":"sum","language":"go","code":"different"}`))
+	second.AddCookie(cookie)
+	second.Header.Set("Idempotency-Key", "same-key")
+	secondRec := httptest.NewRecorder()
+	server.ServeHTTP(secondRec, second)
+	if secondRec.Code != http.StatusConflict {
+		t.Fatalf("second status=%d body=%s", secondRec.Code, secondRec.Body.String())
+	}
+	var body map[string]map[string]string
+	if err := json.NewDecoder(secondRec.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	if body["error"]["code"] != "idempotency_conflict" {
+		t.Fatalf("error body=%+v", body)
+	}
+}
+
+func TestCreateSubmissionReturnsRateLimitHeaders(t *testing.T) {
+	t.Parallel()
+	st := store.NewMemoryStore(testProblems())
+	limiter := &fakeSubmissionLimiter{decisions: []ratelimit.Decision{{
+		Allowed: false, Limit: 10, Remaining: 0, RetryAfter: 5500 * time.Millisecond,
+	}}}
+	metrics := &fakeSubmissionControlMetrics{}
+	server := httpapi.NewServer(st,
+		httpapi.WithSubmissionLimiter(limiter),
+		httpapi.WithSubmissionControlMetrics(metrics),
+	)
+	cookie := registerTestUser(t, server, "limited_user")
+	req := httptest.NewRequest(http.MethodPost, "/submissions", strings.NewReader(`{"problemId":"sum","language":"go","code":"code"}`))
+	req.AddCookie(cookie)
+	rec := httptest.NewRecorder()
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusTooManyRequests {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if rec.Header().Get("RateLimit-Limit") != "10" || rec.Header().Get("RateLimit-Remaining") != "0" || rec.Header().Get("Retry-After") != "6" {
+		t.Fatalf("rate limit headers=%v", rec.Header())
+	}
+	metrics.mu.Lock()
+	defer metrics.mu.Unlock()
+	if metrics.rateLimited != 1 {
+		t.Fatalf("rate limited metric=%d, want 1", metrics.rateLimited)
+	}
+}
+
+func TestCreateSubmissionFailsClosedWhenRateLimiterIsUnavailable(t *testing.T) {
+	t.Parallel()
+	st := store.NewMemoryStore(testProblems())
+	limiter := &fakeSubmissionLimiter{err: errors.New("redis unavailable")}
+	server := httpapi.NewServer(st, httpapi.WithSubmissionLimiter(limiter))
+	cookie := registerTestUser(t, server, "limiter_error_user")
+	req := httptest.NewRequest(http.MethodPost, "/submissions", strings.NewReader(`{"problemId":"sum","language":"go","code":"code"}`))
+	req.AddCookie(cookie)
+	rec := httptest.NewRecorder()
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	var body map[string]map[string]string
+	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	if body["error"]["code"] != "rate_limit_unavailable" {
+		t.Fatalf("error body=%+v", body)
 	}
 }
 

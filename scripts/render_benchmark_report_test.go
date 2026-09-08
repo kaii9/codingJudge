@@ -38,6 +38,7 @@ func TestRenderFromFixtures(t *testing.T) {
 		"Docker socket passthrough",
 		"returns to 0 after each round",
 		"sampled every 5 seconds",
+		"under this fixed load",
 	} {
 		if !strings.Contains(output, want) {
 			t.Errorf("missing %q in output:\n%s", want, output)
@@ -302,6 +303,20 @@ func TestCaseUploaderDefaultsToAllCaseAssets(t *testing.T) {
 	}
 }
 
+func TestWorkerWaitsForJudgeImages(t *testing.T) {
+	compose, err := os.ReadFile("../docker-compose.yml")
+	if err != nil {
+		t.Fatalf("read docker-compose.yml: %v", err)
+	}
+	body := string(compose)
+	if !strings.Contains(body, "judge-images:") || !strings.Contains(body, "docker image inspect \"$$image\"") {
+		t.Fatal("compose should preflight judge images before starting workers")
+	}
+	if !strings.Contains(body, "judge-images:\n        condition: service_completed_successfully") {
+		t.Fatal("worker should wait for the judge-images preflight")
+	}
+}
+
 func TestMinIOAssetSmokeChecksHot20ObjectBackedCases(t *testing.T) {
 	script, err := os.ReadFile("smoke-minio-assets.sh")
 	if err != nil {
@@ -337,6 +352,46 @@ func TestCIWorkflowCoversMinIOObjectStoragePath(t *testing.T) {
 	} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("CI workflow missing %q", want)
+		}
+	}
+}
+
+func TestSubmissionAutomationAuthenticates(t *testing.T) {
+	loadClient, err := os.ReadFile("../loadtest/lib/client.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	faultScript, err := os.ReadFile("fault-test.sh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	e2e, err := os.ReadFile("../frontend/e2e/judge-flow.spec.ts")
+	if err != nil {
+		t.Fatal(err)
+	}
+	workflow, err := os.ReadFile("../.github/workflows/ci.yml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, body := range map[string]string{
+		"k6 client":   string(loadClient),
+		"fault test":  string(faultScript),
+		"browser e2e": string(e2e),
+	} {
+		if !strings.Contains(body, "/auth/register") && !strings.Contains(body, "Register") {
+			t.Fatalf("%s does not establish an authenticated session", name)
+		}
+	}
+	if !strings.Contains(string(workflow), "npm --prefix frontend run test:e2e") {
+		t.Fatal("CI must run the browser judge flow")
+	}
+	for _, path := range []string{"../loadtest/submissions.js", "../loadtest/mixed.js"} {
+		body, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(string(body), "noCookiesReset: true") {
+			t.Fatalf("%s should retain each VU's session cookie between iterations", path)
 		}
 	}
 }

@@ -4,6 +4,7 @@ package store
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
@@ -12,7 +13,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/kai/codingjudge/internal/domain"
+	"github.com/kaii9/codingJudge/internal/domain"
 )
 
 func integrationStore(t *testing.T) *PostgresStore {
@@ -111,6 +112,70 @@ func TestPostgresSubmissionAndOutboxAreAtomic(t *testing.T) {
 	events, err := st.ClaimOutbox(ctx, "api-1", time.Now().UTC(), 30*time.Second, 10)
 	if err != nil || len(events) != 1 || events[0].SubmissionID != sub.ID {
 		t.Fatalf("events = %+v, %v", events, err)
+	}
+}
+
+func TestPostgresIdempotentSubmissionCreatesOneOutboxEventConcurrently(t *testing.T) {
+	st := integrationStore(t)
+	ctx := context.Background()
+	username := fmt.Sprintf("idem_%d", time.Now().UnixNano())
+	user, err := st.CreateUser(ctx, username, "hash")
+	if err != nil {
+		t.Fatal(err)
+	}
+	const callers = 12
+	results := make(chan domain.Submission, callers)
+	replays := make(chan bool, callers)
+	errs := make(chan error, callers)
+	var wg sync.WaitGroup
+	for range callers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			sub, replayed, err := st.CreateSubmissionIdempotent(ctx, domain.Submission{
+				UserID: user.ID, ProblemID: "sum", Language: domain.LanguageGo, Code: "code",
+			}, "request-1", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+			results <- sub
+			replays <- replayed
+			errs <- err
+		}()
+	}
+	wg.Wait()
+	close(results)
+	close(replays)
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	var submissionID string
+	for sub := range results {
+		if submissionID == "" {
+			submissionID = sub.ID
+		}
+		if sub.ID != submissionID {
+			t.Fatalf("submission ID=%q, want %q", sub.ID, submissionID)
+		}
+	}
+	replayCount := 0
+	for replayed := range replays {
+		if replayed {
+			replayCount++
+		}
+	}
+	if replayCount != callers-1 {
+		t.Fatalf("replays=%d, want %d", replayCount, callers-1)
+	}
+	var submissions, events int
+	if err := st.pool.QueryRow(ctx, `SELECT count(*) FROM submissions WHERE user_id=$1`, user.ID).Scan(&submissions); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.pool.QueryRow(ctx, `SELECT count(*) FROM judge_outbox WHERE submission_id=$1`, submissionID).Scan(&events); err != nil {
+		t.Fatal(err)
+	}
+	if submissions != 1 || events != 1 {
+		t.Fatalf("submissions=%d outbox events=%d, want 1 and 1", submissions, events)
 	}
 }
 

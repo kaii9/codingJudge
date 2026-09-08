@@ -3,15 +3,18 @@ package judge
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
-	"github.com/kai/codingjudge/internal/domain"
+	"github.com/kaii9/codingJudge/internal/domain"
 )
 
 const maxCapturedOutputBytes = 1 << 20
@@ -158,14 +161,26 @@ func (r *DockerRunner) runPrepared(ctx context.Context, req RunRequest, workdir 
 }
 
 func executeDocker(ctx context.Context, args []string) (RunResult, error) {
-	cmd := exec.CommandContext(ctx, "docker", args...)
+	name, err := newContainerName()
+	if err != nil {
+		return RunResult{}, fmt.Errorf("generate sandbox container name: %w", err)
+	}
+	return executeDockerNamed(ctx, args, name)
+}
+
+func executeDockerNamed(ctx context.Context, args []string, name string) (RunResult, error) {
+	namedArgs, err := dockerArgsWithName(args, name)
+	if err != nil {
+		return RunResult{}, err
+	}
+	cmd := exec.CommandContext(ctx, "docker", namedArgs...)
 	started := time.Now()
 	stdout := newLimitedBuffer(maxCapturedOutputBytes)
 	stderr := newLimitedBuffer(maxCapturedOutputBytes)
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
 
-	err := cmd.Run()
+	err = cmd.Run()
 	duration := time.Since(started).Milliseconds()
 	result := RunResult{
 		Stdout:   capturedOutput(stdout, "stdout"),
@@ -173,6 +188,11 @@ func executeDocker(ctx context.Context, args []string) (RunResult, error) {
 		Duration: duration,
 	}
 	if ctx.Err() != nil {
+		cleanupCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if cleanupErr := forceRemoveContainer(cleanupCtx, name); cleanupErr != nil {
+			return result, fmt.Errorf("remove timed-out sandbox container %q: %w", name, cleanupErr)
+		}
 		result.TimedOut = true
 		return result, nil
 	}
@@ -186,6 +206,39 @@ func executeDocker(ctx context.Context, args []string) (RunResult, error) {
 		return result, nil
 	}
 	return result, err
+}
+
+func dockerArgsWithName(args []string, name string) ([]string, error) {
+	if len(args) == 0 || args[0] != "run" {
+		return nil, fmt.Errorf("docker sandbox command must start with run")
+	}
+	if strings.TrimSpace(name) == "" {
+		return nil, fmt.Errorf("docker sandbox container name is required")
+	}
+	named := make([]string, 0, len(args)+2)
+	named = append(named, "run", "--name", name)
+	named = append(named, args[1:]...)
+	return named, nil
+}
+
+func forceRemoveContainer(ctx context.Context, name string) error {
+	output, err := exec.CommandContext(ctx, "docker", "rm", "-f", name).CombinedOutput()
+	if err == nil || strings.Contains(strings.ToLower(string(output)), "no such container") {
+		return nil
+	}
+	message := strings.TrimSpace(string(output))
+	if message == "" {
+		return err
+	}
+	return fmt.Errorf("%w: %s", err, message)
+}
+
+func newContainerName() (string, error) {
+	var suffix [8]byte
+	if _, err := rand.Read(suffix[:]); err != nil {
+		return "", err
+	}
+	return "codingjudge-exec-" + hex.EncodeToString(suffix[:]), nil
 }
 
 func capturedOutput(buffer *limitedBuffer, name string) string {

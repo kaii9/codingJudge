@@ -46,10 +46,14 @@
       "gridPos": {"h": 8, "w": 8, "x": 8, "y": 9}
     },
     {
-      "title": "Submissions created by language",
+      "title": "Submission admission rate",
       "type": "timeseries",
       "fieldConfig": {"defaults": {"unit": "reqps"}},
-      "targets": [{"expr": "sum by (language) (rate(codingjudge_submissions_created_total[5m]))", "refId": "A", "legendFormat": "{{language}}"}],
+      "targets": [
+        {"expr": "sum by (language) (rate(codingjudge_submissions_created_total[5m]))", "refId": "A", "legendFormat": "created {{language}}"},
+        {"expr": "sum by (result) (rate(codingjudge_submission_idempotency_total[5m]))", "refId": "B", "legendFormat": "idempotency {{result}}"},
+        {"expr": "sum(rate(codingjudge_submission_rate_limited_total[5m]))", "refId": "C", "legendFormat": "rate limited"}
+      ],
       "gridPos": {"h": 8, "w": 8, "x": 16, "y": 9}
     },
     {

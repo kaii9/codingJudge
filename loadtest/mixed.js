@@ -1,9 +1,10 @@
-import { createSubmission, pollUntilTerminal, findSumProblem, getProblem } from './lib/client.js';
+import { createSubmission, pollUntilTerminal, findSumProblem, getProblem, ensureAuthenticated } from './lib/client.js';
 import { byLanguage } from './lib/programs.js';
 
 const languages = ['go', 'cpp', 'python'];
 
 export const options = {
+  noCookiesReset: true,
   vus: parseInt(__ENV.CJ_VUS) || 20,
   duration: __ENV.CJ_DURATION || '2m',
   thresholds: {
@@ -14,6 +15,7 @@ export const options = {
 };
 
 export default function () {
+  if (!ensureAuthenticated()) return;
   // 确定性 80% reads / 20% submissions（基于 VU+迭代编号，不使用 Math.random）。
   const bucket = (__VU + __ITER) % 5; // 0-3 → read, 4 → submit
   if (bucket < 4) {

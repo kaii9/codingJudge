@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kai/codingjudge/internal/judgeworker"
+	"github.com/kaii9/codingJudge/internal/judgeworker"
 )
 
 type fakeSlot struct {

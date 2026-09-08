@@ -7,7 +7,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/kai/codingjudge/internal/domain"
+	"github.com/kaii9/codingJudge/internal/domain"
 	"github.com/redis/go-redis/v9"
 )
 

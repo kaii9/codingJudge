@@ -154,6 +154,16 @@ paths:
       summary: Create a code submission
       security:
         - cookieAuth: []
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: false
+          description: Client-generated key that makes concurrent retries return the original submission.
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 128
+            pattern: "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
       requestBody:
         required: true
         content:
@@ -163,6 +173,17 @@ paths:
       responses:
         "202":
           description: Submission accepted and queued
+          headers:
+            Idempotency-Replayed:
+              description: Present and true when an existing submission is replayed.
+              schema:
+                type: boolean
+            RateLimit-Limit:
+              schema:
+                type: integer
+            RateLimit-Remaining:
+              schema:
+                type: integer
           content:
             application/json:
               schema:
@@ -181,6 +202,34 @@ paths:
                 $ref: "#/components/schemas/Error"
         "401":
           description: Login required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          description: Idempotency key reused with a different request body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "429":
+          description: Per-user submission rate limit exceeded
+          headers:
+            Retry-After:
+              schema:
+                type: integer
+            RateLimit-Limit:
+              schema:
+                type: integer
+            RateLimit-Remaining:
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "503":
+          description: Submission admission control is unavailable
           content:
             application/json:
               schema:

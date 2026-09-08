@@ -8,13 +8,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kai/codingjudge/internal/domain"
-	"github.com/kai/codingjudge/internal/outbox"
+	"github.com/kaii9/codingJudge/internal/domain"
+	"github.com/kaii9/codingJudge/internal/outbox"
 )
 
 type fakeMetrics struct {
-	mu         sync.Mutex
-	results    []string
+	mu           sync.Mutex
+	results      []string
 	durationsSet []bool
 }
 
@@ -71,8 +71,8 @@ func TestRelayRecordsMetricOnError(t *testing.T) {
 func TestRelayRecordsMetricOnClaimLost(t *testing.T) {
 	now := time.Date(2026, 7, 2, 8, 0, 0, 0, time.UTC)
 	st := &fakeStore{
-		events:     []domain.OutboxEvent{{ID: 7, SubmissionID: "sub-1", ClaimToken: "api-1", PublishAttempts: 1}},
-		noMark:     true,
+		events: []domain.OutboxEvent{{ID: 7, SubmissionID: "sub-1", ClaimToken: "api-1", PublishAttempts: 1}},
+		noMark: true,
 	}
 	pub := &fakePublisher{calls: &st.calls}
 	metrics := &fakeMetrics{}

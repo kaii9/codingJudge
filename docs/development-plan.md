@@ -196,6 +196,8 @@ Acceptance:
 
 ## Phase 9: Product Extensions
 
+Status: partially implemented. User authentication, personal submission history, leaderboard, and MinIO assets are complete; contests and administration remain out of scope.
+
 Goal: turn MVP into a richer judge platform.
 
 Tasks:
@@ -210,9 +212,31 @@ Acceptance:
 
 - Project can be presented as a backend-heavy platform with production-aware architecture.
 
+## Phase 10: Submission Admission Control
+
+Status: implemented.
+
+Goal: prevent retry races and abusive submission traffic from multiplying expensive judge work.
+
+Tasks:
+
+- Accept an optional, validated `Idempotency-Key` on submission creation.
+- Persist a canonical request hash and enforce per-user key uniqueness in PostgreSQL.
+- Create the submission and transactional outbox event exactly once under concurrent retries.
+- Enforce a distributed per-user token bucket with an atomic Redis Lua script.
+- Return structured `409`, `429`, `503`, `Retry-After`, and rate-limit headers.
+- Expose bounded-cardinality idempotency and rejection metrics in Prometheus and Grafana.
+
+Acceptance:
+
+- Concurrent identical requests return one submission ID and create one outbox event.
+- Reusing a key with a different request body returns `409 idempotency_conflict`.
+- Exceeding the configured burst returns `429 rate_limited` with `Retry-After`.
+- Redis failure fails submission creation closed with `503 rate_limit_unavailable`.
+
 ## Current Development Slice
 
-The backend MVP, browser demo, reliable multi-worker phase, curated problem library, and observability/load testing are complete. The next recommended slice is authentication and product extensions.
+The backend MVP, browser demo, reliable multi-worker phase, curated problem library, observability/load testing, authentication, MinIO assets, and submission admission control are complete. The next recommended slice is cursor pagination plus a unified OpenAPI/error contract.
 
 Reason:
 
@@ -227,9 +251,10 @@ Reason:
 - Playwright verifies browser submissions and responsive desktop/mobile layouts.
 - Prometheus and Grafana provide real-time observability with a pre-provisioned dashboard.
 - k6 workloads compare latency, failures, and sampled Pending under identical fixed load (not maximum throughput). All rounds pass strict validation.
+- PostgreSQL-backed idempotency prevents duplicate submissions/outbox events, while Redis admission control protects expensive judge capacity across API replicas.
 
 Not yet implemented:
 
-- Authentication and user accounts.
-- Contests, leaderboards and administration.
-- MinIO-backed test-case storage.
+- Contests and administration.
+- Cursor pagination for growing submission histories.
+- A generated/validated OpenAPI contract and unified error catalog.

@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/kai/codingjudge/internal/domain"
+	"github.com/kaii9/codingJudge/internal/domain"
 )
 
 func (s *PostgresStore) ClaimOutbox(ctx context.Context, owner string, now time.Time, claimDuration time.Duration, limit int) ([]domain.OutboxEvent, error) {

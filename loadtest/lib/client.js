@@ -10,6 +10,28 @@ export const logicalFailure = new Rate('logical_failures');
 export const submissionsCreated = new Counter('submissions_created');
 export const submissionsAccepted = new Counter('submissions_accepted');
 
+let authenticated = false;
+
+export function ensureAuthenticated() {
+  if (authenticated) return true;
+
+  const username = `k6_${Date.now().toString(36)}_${__VU}`;
+  const password = 'correct-password';
+  const payload = JSON.stringify({ username, password });
+  const params = { headers: { 'Content-Type': 'application/json' } };
+  const register = http.post(`${BASE_URL}/auth/register`, payload, params);
+  if (register.status !== 201) {
+    const login = http.post(`${BASE_URL}/auth/login`, payload, params);
+    if (login.status !== 200) {
+      check(login, { 'load-test authentication succeeds': () => false });
+      logicalFailure.add(1);
+      return false;
+    }
+  }
+  authenticated = true;
+  return true;
+}
+
 export function listProblems() {
   const res = http.get(`${BASE_URL}/problems`);
   check(res, { 'list problems 200': (r) => r.status === 200 });
@@ -25,7 +47,10 @@ export function getProblem(id) {
 export function createSubmission(problemId, language, code) {
   const payload = JSON.stringify({ problemId, language, code });
   const res = http.post(`${BASE_URL}/submissions`, payload, {
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      'Idempotency-Key': `k6-${__VU}-${__ITER}-${Date.now()}`,
+    },
   });
   check(res, { 'create submission 202': (r) => r.status === 202 });
   if (res.status !== 202) {
@@ -51,7 +76,7 @@ export function pollUntilTerminal(submissionId) {
     }
     const sub = res.json();
     const status = sub.status;
-    if (['accepted', 'wrong_answer', 'runtime_error', 'time_limit_exceeded', 'internal_error'].includes(status)) {
+    if (['accepted', 'wrong_answer', 'compile_error', 'runtime_error', 'time_limit_exceeded', 'internal_error'].includes(status)) {
       if (status === 'accepted') {
         logicalFailure.add(0);
         submissionsAccepted.add(1);

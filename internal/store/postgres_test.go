@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kai/codingjudge/internal/domain"
+	"github.com/kaii9/codingJudge/internal/domain"
 )
 
 func TestScanSubmissionIncludesCodeForWorker(t *testing.T) {

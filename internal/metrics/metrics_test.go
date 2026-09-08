@@ -17,6 +17,8 @@ func TestAllTargetMetricsRegistered(t *testing.T) {
 	app.ObserveHTTP("GET", "/problems/{id}", 200, 5*time.Millisecond)
 	app.ObserveHTTP("GET", "/submissions", 404, 1*time.Millisecond)
 	app.SubmissionCreated("go")
+	app.SubmissionIdempotency("created")
+	app.SubmissionRateLimited()
 	app.ObserveOutboxPublish("success", 10*time.Millisecond)
 	app.ObserveQueueOperation("enqueue", "success")
 	app.SetQueuePending(3)
@@ -46,6 +48,8 @@ func TestAllTargetMetricsRegistered(t *testing.T) {
 		"codingjudge_http_requests_total",
 		"codingjudge_http_request_duration_seconds",
 		"codingjudge_submissions_created_total",
+		"codingjudge_submission_idempotency_total",
+		"codingjudge_submission_rate_limited_total",
 		"codingjudge_outbox_publish_total",
 		"codingjudge_outbox_publish_duration_seconds",
 		"codingjudge_queue_operations_total",

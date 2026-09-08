@@ -10,9 +10,9 @@ import (
 	"strings"
 	"syscall"
 
-	"github.com/kai/codingjudge/internal/caseassets"
-	"github.com/kai/codingjudge/internal/objectstore"
-	"github.com/kai/codingjudge/internal/store"
+	"github.com/kaii9/codingJudge/internal/caseassets"
+	"github.com/kaii9/codingJudge/internal/objectstore"
+	"github.com/kaii9/codingJudge/internal/store"
 )
 
 func main() {

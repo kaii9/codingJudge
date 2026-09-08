@@ -1,6 +1,6 @@
 package problems
 
-import "github.com/kai/codingjudge/internal/domain"
+import "github.com/kaii9/codingJudge/internal/domain"
 
 func SampleProblems() []domain.Problem {
 	return []domain.Problem{

@@ -5,13 +5,33 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/kai/codingjudge/internal/domain"
+	"github.com/kaii9/codingJudge/internal/domain"
 )
 
 func TestDockerRunnerSupportsBatchExecution(t *testing.T) {
 	t.Parallel()
 
 	var _ BatchRunner = (*DockerRunner)(nil)
+}
+
+func TestDockerArgsWithName(t *testing.T) {
+	t.Parallel()
+
+	args, err := dockerArgsWithName([]string{"run", "--rm", "python:3.12-alpine", "true"}, "sandbox-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !containsAdjacent(args, "--name", "sandbox-1") {
+		t.Fatalf("named docker args = %#v", args)
+	}
+}
+
+func TestDockerArgsWithNameRejectsNonRunCommand(t *testing.T) {
+	t.Parallel()
+
+	if _, err := dockerArgsWithName([]string{"ps"}, "sandbox-1"); err == nil {
+		t.Fatal("expected non-run docker command to be rejected")
+	}
 }
 
 func TestLimitedBufferCapsCapturedOutput(t *testing.T) {

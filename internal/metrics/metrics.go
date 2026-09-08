@@ -8,22 +8,24 @@ import (
 
 // App aggregates all codingjudge application metrics within a single registry.
 type App struct {
-	httpTotal        *prometheus.CounterVec
-	httpDuration     *prometheus.HistogramVec
-	submissionsTotal *prometheus.CounterVec
-	outboxTotal      *prometheus.CounterVec
-	outboxDuration   prometheus.Histogram
-	queueOpsTotal    *prometheus.CounterVec
-	queuePending     prometheus.Gauge
-	workerSlots      prometheus.Gauge
-	workerInFlight   prometheus.Gauge
-	workerJobsTotal  *prometheus.CounterVec
-	workerDuration   *prometheus.HistogramVec
-	workerRetries    prometheus.Counter
-	workerDeadLetter prometheus.Counter
-	workerTakeovers  prometheus.Counter
-	judgeCasesTotal  *prometheus.CounterVec
-	judgeDuration    *prometheus.HistogramVec
+	httpTotal             *prometheus.CounterVec
+	httpDuration          *prometheus.HistogramVec
+	submissionsTotal      *prometheus.CounterVec
+	submissionIdempotency *prometheus.CounterVec
+	submissionRateLimited prometheus.Counter
+	outboxTotal           *prometheus.CounterVec
+	outboxDuration        prometheus.Histogram
+	queueOpsTotal         *prometheus.CounterVec
+	queuePending          prometheus.Gauge
+	workerSlots           prometheus.Gauge
+	workerInFlight        prometheus.Gauge
+	workerJobsTotal       *prometheus.CounterVec
+	workerDuration        *prometheus.HistogramVec
+	workerRetries         prometheus.Counter
+	workerDeadLetter      prometheus.Counter
+	workerTakeovers       prometheus.Counter
+	judgeCasesTotal       *prometheus.CounterVec
+	judgeDuration         *prometheus.HistogramVec
 }
 
 // New creates a metrics.App and registers every collector into reg.
@@ -35,6 +37,8 @@ func New(reg prometheus.Registerer) *App {
 		m.httpTotal,
 		m.httpDuration,
 		m.submissionsTotal,
+		m.submissionIdempotency,
+		m.submissionRateLimited,
 		m.outboxTotal,
 		m.outboxDuration,
 		m.queueOpsTotal,
@@ -69,6 +73,16 @@ func newApp() *App {
 			Name: "codingjudge_submissions_created_total",
 			Help: "Total submissions accepted by the API.",
 		}, []string{"language"}),
+
+		submissionIdempotency: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "codingjudge_submission_idempotency_total",
+			Help: "Total idempotent submission requests by outcome.",
+		}, []string{"result"}),
+
+		submissionRateLimited: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "codingjudge_submission_rate_limited_total",
+			Help: "Total submission requests rejected by the per-user rate limiter.",
+		}),
 
 		outboxTotal: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "codingjudge_outbox_publish_total",
@@ -152,6 +166,14 @@ func (m *App) SubmissionCreated(language string) {
 	m.submissionsTotal.WithLabelValues(language).Inc()
 }
 
+func (m *App) SubmissionIdempotency(result string) {
+	m.submissionIdempotency.WithLabelValues(result).Inc()
+}
+
+func (m *App) SubmissionRateLimited() {
+	m.submissionRateLimited.Inc()
+}
+
 // ObserveOutboxPublish records a single outbox event publish attempt.
 func (m *App) ObserveOutboxPublish(result string, duration time.Duration) {
 	m.outboxTotal.WithLabelValues(result).Inc()
@@ -224,6 +246,8 @@ func (m *App) Describe(ch chan<- *prometheus.Desc) {
 	m.httpTotal.Describe(ch)
 	m.httpDuration.Describe(ch)
 	m.submissionsTotal.Describe(ch)
+	m.submissionIdempotency.Describe(ch)
+	m.submissionRateLimited.Describe(ch)
 	m.outboxTotal.Describe(ch)
 	m.outboxDuration.Describe(ch)
 	m.queueOpsTotal.Describe(ch)
@@ -244,6 +268,8 @@ func (m *App) Collect(ch chan<- prometheus.Metric) {
 	m.httpTotal.Collect(ch)
 	m.httpDuration.Collect(ch)
 	m.submissionsTotal.Collect(ch)
+	m.submissionIdempotency.Collect(ch)
+	m.submissionRateLimited.Collect(ch)
 	m.outboxTotal.Collect(ch)
 	m.outboxDuration.Collect(ch)
 	m.queueOpsTotal.Collect(ch)

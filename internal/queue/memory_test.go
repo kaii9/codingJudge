@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kai/codingjudge/internal/domain"
-	"github.com/kai/codingjudge/internal/queue"
+	"github.com/kaii9/codingJudge/internal/domain"
+	"github.com/kaii9/codingJudge/internal/queue"
 )
 
 func TestMemoryQueueDequeuesSubmittedJob(t *testing.T) {

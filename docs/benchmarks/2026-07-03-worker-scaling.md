@@ -1,12 +1,13 @@
 # Fixed-Load Worker Scaling Benchmark
 
-**Date:** 2026-07-04T11:07:00Z
+**Date:** 2026-09-07T16:40:28Z
 
 ## Environment
 
 | Key | Value |
 | --- | --- |
-| Git commit | 0ceda67 |
+| Git commit | 3699f85 |
+| Git tree | dirty |
 | OS | Darwin |
 | Architecture | arm64 |
 | Logical CPUs | 8 |
@@ -27,9 +28,9 @@
 
 | Workers | Offered rate | Created/s | Accepted/s | HTTP rate | HTTP P95 | Judge P95 | HTTP failure | Logical failure | Peak pending (sampled) |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| 1 | 1.00/s | 1.00/s | 1.00/s | 52.61/s | 19.18ms | 9489.00ms | 0.0000% | 0.0000% | 1 |
-| 2 | 1.00/s | 1.00/s | 1.00/s | 12.40/s | 17.94ms | 3125.00ms | 0.0000% | 0.0000% | 2 |
-| 4 | 1.00/s | 1.00/s | 1.00/s | 9.03/s | 5.37ms | 837.00ms | 0.0000% | 0.0000% | 1 |
+| 1 | 1.00/s | 1.00/s | 1.00/s | 9.50/s | 4.99ms | 824.00ms | 0.0000% | 0.0000% | 1 |
+| 2 | 1.00/s | 1.00/s | 1.00/s | 9.37/s | 5.17ms | 827.05ms | 0.0000% | 0.0000% | 1 |
+| 4 | 1.00/s | 1.00/s | 1.00/s | 9.12/s | 5.70ms | 826.10ms | 0.0000% | 0.0000% | 1 |
 
 ## Interpretation
 
@@ -42,4 +43,5 @@ _Workers use Docker socket passthrough (Docker-outside-of-Docker), not nested Do
 - Pending returns to 0 after each round, confirming the queue drains under the tested load.
 - Peak Pending values are sampled every 5 seconds during the run and represent the highest observed value.
 - This is NOT a saturation or maximum-throughput benchmark; it compares latency at fixed load.
+- At this offered rate, one worker was not saturated; similar 1/2/4-worker P95 values demonstrate stability, not a scaling gain.
 - This benchmark uses Python submissions only; Go and C++ require Linux native Docker for reliable timing.

@@ -7,6 +7,7 @@ COPY . .
 RUN CGO_ENABLED=0 GOOS=linux go build -o /out/api ./cmd/api
 RUN CGO_ENABLED=0 GOOS=linux go build -o /out/worker ./cmd/worker
 RUN CGO_ENABLED=0 GOOS=linux go build -o /out/upload-cases ./cmd/upload-cases
+RUN CGO_ENABLED=0 GOOS=linux go build -o /out/migrate ./cmd/migrate
 
 FROM alpine:3.20
 
@@ -15,5 +16,7 @@ WORKDIR /app
 COPY --from=build /out/api /app/api
 COPY --from=build /out/worker /app/worker
 COPY --from=build /out/upload-cases /app/upload-cases
+COPY --from=build /out/migrate /app/migrate
+COPY migrations /app/migrations
 EXPOSE 8080
 CMD ["/app/api"]

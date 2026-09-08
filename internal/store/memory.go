@@ -9,7 +9,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/kai/codingjudge/internal/domain"
+	"github.com/kaii9/codingJudge/internal/domain"
 )
 
 type MemoryStore struct {
@@ -22,6 +22,7 @@ type MemoryStore struct {
 	leases       map[string]memoryLease
 	outbox       map[int64]memoryOutbox
 	artifacts    map[string][]domain.SubmissionArtifact
+	idempotency  map[string]memoryIdempotency
 	nextID       int
 	nextUser     int
 	nextOutbox   int64
@@ -29,8 +30,9 @@ type MemoryStore struct {
 }
 
 var (
-	ErrConflict = errors.New("conflict")
-	ErrNotFound = errors.New("not found")
+	ErrConflict            = errors.New("conflict")
+	ErrNotFound            = errors.New("not found")
+	ErrIdempotencyConflict = errors.New("idempotency key reused with a different request")
 )
 
 type memoryUser struct {
@@ -66,6 +68,11 @@ type memoryOutbox struct {
 	lastError       string
 }
 
+type memoryIdempotency struct {
+	submissionID string
+	requestHash  string
+}
+
 func NewMemoryStore(problems []domain.Problem) *MemoryStore {
 	st := &MemoryStore{
 		problems:    make(map[string]domain.Problem, len(problems)),
@@ -76,11 +83,16 @@ func NewMemoryStore(problems []domain.Problem) *MemoryStore {
 		leases:      make(map[string]memoryLease),
 		outbox:      make(map[int64]memoryOutbox),
 		artifacts:   make(map[string][]domain.SubmissionArtifact),
+		idempotency: make(map[string]memoryIdempotency),
 	}
 	for _, problem := range problems {
 		st.problems[problem.ID] = cloneProblem(problem)
 	}
 	return st
+}
+
+func (s *MemoryStore) Ping(ctx context.Context) error {
+	return ctx.Err()
 }
 
 func normalizeUsername(username string) string {
@@ -242,12 +254,29 @@ func (s *MemoryStore) GetProblem(ctx context.Context, id string) (domain.Problem
 }
 
 func (s *MemoryStore) CreateSubmission(ctx context.Context, sub domain.Submission) (domain.Submission, error) {
+	created, _, err := s.CreateSubmissionIdempotent(ctx, sub, "", "")
+	return created, err
+}
+
+func (s *MemoryStore) CreateSubmissionIdempotent(ctx context.Context, sub domain.Submission, idempotencyKey, requestHash string) (domain.Submission, bool, error) {
 	if err := ctx.Err(); err != nil {
-		return domain.Submission{}, err
+		return domain.Submission{}, false, err
+	}
+	if idempotencyKey == "" {
+		requestHash = ""
 	}
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if idempotencyKey != "" {
+		lookupKey := submissionIdempotencyLookupKey(sub.UserID, idempotencyKey)
+		if record, ok := s.idempotency[lookupKey]; ok {
+			if record.requestHash != requestHash {
+				return domain.Submission{}, false, ErrIdempotencyConflict
+			}
+			return cloneSubmission(s.submissions[record.submissionID]), true, nil
+		}
+	}
 
 	s.nextID++
 	now := time.Now().UTC()
@@ -262,7 +291,30 @@ func (s *MemoryStore) CreateSubmission(ctx context.Context, sub domain.Submissio
 		submissionID:  sub.ID,
 		nextAttemptAt: now,
 	}
-	return sub, nil
+	if idempotencyKey != "" {
+		s.idempotency[submissionIdempotencyLookupKey(sub.UserID, idempotencyKey)] = memoryIdempotency{
+			submissionID: sub.ID,
+			requestHash:  requestHash,
+		}
+	}
+	return sub, false, nil
+}
+
+func (s *MemoryStore) FindSubmissionByIdempotencyKey(ctx context.Context, userID, idempotencyKey string) (domain.Submission, string, bool, error) {
+	if err := ctx.Err(); err != nil {
+		return domain.Submission{}, "", false, err
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	record, ok := s.idempotency[submissionIdempotencyLookupKey(userID, idempotencyKey)]
+	if !ok {
+		return domain.Submission{}, "", false, nil
+	}
+	return cloneSubmission(s.submissions[record.submissionID]), record.requestHash, true, nil
+}
+
+func submissionIdempotencyLookupKey(userID, idempotencyKey string) string {
+	return userID + "\x00" + idempotencyKey
 }
 
 func (s *MemoryStore) GetSubmission(ctx context.Context, id string) (domain.Submission, bool, error) {

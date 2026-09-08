@@ -28,6 +28,7 @@ curl -fsS -c "$COOKIE_FILE" \
 
 submission_id="$(curl -fsS -b "$COOKIE_FILE" \
   -H 'Content-Type: application/json' \
+  -H "Idempotency-Key: asset-$USERNAME" \
   -d '{"problemId":"sum","language":"python","code":"a,b=map(int,input().split())\nprint(a+b)"}' \
   "$API_URL/submissions" | sed -n 's/.*"id":"\([^"]*\)".*/\1/p')"
 

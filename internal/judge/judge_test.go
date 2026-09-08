@@ -5,8 +5,8 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/kai/codingjudge/internal/domain"
-	"github.com/kai/codingjudge/internal/judge"
+	"github.com/kaii9/codingJudge/internal/domain"
+	"github.com/kaii9/codingJudge/internal/judge"
 )
 
 type fakeRunner struct {

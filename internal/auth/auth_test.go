@@ -3,7 +3,7 @@ package auth_test
 import (
 	"testing"
 
-	"github.com/kai/codingjudge/internal/auth"
+	"github.com/kaii9/codingJudge/internal/auth"
 )
 
 func TestPasswordHashDoesNotStorePlaintextAndVerifies(t *testing.T) {

@@ -1,5 +1,7 @@
 # GoJudge
 
+[![CI](https://github.com/kaii9/codingJudge/actions/workflows/ci.yml/badge.svg)](https://github.com/kaii9/codingJudge/actions/workflows/ci.yml)
+
 GoJudge 是一个后端主导的在线代码评测系统。项目核心围绕一句话：Web 后端只是外壳，真正的难点是安全地运行不可信代码。
 
 当前仓库实现了完整 MVP 主链路：用户注册登录、浏览题目、Monaco 编辑代码、提交 Go/C++/Python、异步判题、轮询结果、查看个人提交历史和全站排行榜。题库包含 20 道原创面试高频题和 2 道 Starter 题，覆盖数组、哈希、滑动窗口、链表、树、图与动态规划。Compose 环境包含 Next.js 前端、Go API、独立 judge worker、PostgreSQL、Redis Streams 和 MinIO；Redis 消费支持成功后确认、三次重试、死信流和 pending 回收。无外部服务的本地测试默认使用内存 store 和内存 queue。
@@ -42,7 +44,7 @@ flowchart LR
     WorkerB --> Docker
 ```
 
-前端只通过 API 创建和查询提交；API 在一个 PostgreSQL 事务中保存 submission 和 outbox 事件，relay 负责可靠发布到 Redis，但不消费任务。多个 worker 直接通过同一 Consumer Group 抢任务，Docker 沙箱只在 worker 中执行。数据库字段实现应用层租约和 fencing token 防护，决定最终写权限，避免重复消息或旧 worker 的迟到结果覆盖新结果。MinIO 承载 object-backed 测试用例文件和提交源码/stdout/stderr artifact，PostgreSQL 保存 object key、size 和 SHA256 metadata。
+前端只通过 API 创建和查询提交；API 先通过 Redis Lua 令牌桶执行用户级提交限流，再在一个 PostgreSQL 事务中保存 submission 和 outbox 事件。`Idempotency-Key` 与请求指纹受数据库唯一索引保护，并发重试只会产生一个 submission 和一条 outbox 事件。relay 负责可靠发布到 Redis，但不消费任务。多个 worker 直接通过同一 Consumer Group 抢任务，Docker 沙箱只在 worker 中执行。数据库字段实现应用层租约和 fencing token 防护，决定最终写权限，避免重复消息或旧 worker 的迟到结果覆盖新结果。MinIO 承载 object-backed 测试用例文件和提交源码/stdout/stderr artifact，PostgreSQL 保存 object key、size 和 SHA256 metadata。
 
 ## Quick Start
 
@@ -58,7 +60,7 @@ make test
 make compose-up
 ```
 
-`make compose-up` 会先检查并拉取 Go、Python 和 GCC 判题镜像，避免首次判题时把镜像下载时间计入运行时限。若直接使用 `docker compose up -d --build`，请先执行 `make judge-images`。
+Compose 会在 Worker 启动前检查并拉取 Go、Python 和 GCC 判题镜像，避免首次判题时把镜像下载时间计入编译或运行时限。`make compose-up` 也会在构建前做同样的预检。
 
 Compose 暴露的开发端口：
 
@@ -78,7 +80,10 @@ Compose 暴露的开发端口：
 ```bash
 curl http://localhost:3000/
 curl http://localhost:18080/healthz
+curl http://localhost:18080/readyz
 ```
+
+`/healthz` 只表示 API 进程存活；`/readyz` 会在 2 秒总时限内检查 PostgreSQL、Redis 和 MinIO，任一依赖不可用即返回 `503`。HTTPS 部署必须设置 `COOKIE_SECURE=true`，本地 HTTP Compose 才使用 `false`。
 
 浏览器打开 `http://localhost:3000`。主页会进入首个题目工作台：
 
@@ -95,14 +100,13 @@ curl http://localhost:18080/healthz
 docker compose up -d --scale worker=3
 ```
 
-已有 PostgreSQL 数据卷升级一次：
+手动执行数据库迁移（默认连接本地 Compose PostgreSQL，也可覆盖 `DATABASE_URL`）：
 
 ```bash
-make migrate-reliable-workers
-make migrate-hot20
+make migrate
 ```
 
-两个迁移命令都可重复执行。新建数据卷会在 PostgreSQL 初始化时自动应用全部迁移；已有数据卷需要手动执行新增迁移。
+Compose 启动时会先运行独立 `migrate` 服务。迁移器使用 PostgreSQL advisory lock 防止并发执行，以版本和 SHA256 校验已应用文件，并能识别、登记旧数据卷中已存在的 001-006 schema。
 
 ## Frontend
 
@@ -210,12 +214,15 @@ curl http://localhost:18080/problems/sum
 curl -b /tmp/gojudge.cookies \
   -X POST http://localhost:18080/submissions \
   -H 'Content-Type: application/json' \
+  -H 'Idempotency-Key: attempt-20260908-001' \
   -d '{
     "problemId": "sum",
     "language": "go",
     "code": "package main\nimport \"fmt\"\nfunc main(){var a,b int; fmt.Scan(&a,&b); fmt.Println(a+b)}"
   }'
 ```
+
+相同用户使用相同 `Idempotency-Key` 和相同请求体重试时，API 返回原 submission 并设置 `Idempotency-Replayed: true`；相同 key 搭配不同请求体返回 `409 idempotency_conflict`。幂等重放不会产生新的判题工作，因此不消耗新提交配额。默认用户级限流为每分钟 10 个 token、突发容量 3，超限返回 `429 rate_limited`、`Retry-After` 与剩余配额响应头。可通过 `SUBMISSION_RATE_LIMIT_PER_MINUTE` 和 `SUBMISSION_RATE_LIMIT_BURST` 调整。
 
 提交 C++ 或 Python 时，`language` 可传 `cpp` 或 `python`。worker 默认按语言选择 Docker 镜像；只有显式配置 `JUDGE_IMAGE` 时才会覆盖默认镜像。
 
@@ -314,7 +321,7 @@ API 和每个 worker 都在独立端口暴露 Prometheus 指标（API: `:8080/me
 make observability-up
 ```
 
-Grafana 预配 Dashboard（UID `gojudge-overview`）包含 API、Queue/Outbox、Worker、Judge 四个行，内置 HTTP 吞吐/延迟/错误、队列深度、worker 并发度和判题用例耗时面板。默认凭据 admin/admin。
+Grafana 预配 Dashboard（UID `gojudge-overview`）包含 API、Queue/Outbox、Worker、Judge 四个行，内置 HTTP 吞吐/延迟/错误、幂等命中与限流拒绝、队列深度、worker 并发度和判题用例耗时面板。默认凭据 admin/admin。
 
 验证配置：
 
@@ -369,11 +376,13 @@ npm run test:e2e
 ```text
 cmd/api/              API service entrypoint
 cmd/worker/           isolated judge worker entrypoint
+cmd/migrate/          versioned PostgreSQL migration runner
 frontend/             Next.js app, Monaco workbench, unit and Playwright tests
 internal/domain/      shared domain models
 internal/httpapi/     net/http JSON API
 internal/store/       in-memory and PostgreSQL problem/submission stores
 internal/queue/       in-memory and reliable Redis Streams queues
+internal/ratelimit/   atomic Redis per-user submission token bucket
 internal/outbox/      transactional outbox relay
 internal/judge/       judge service and Docker runner
 internal/judgeworker/ worker leases, heartbeat, retries and concurrency
@@ -391,6 +400,7 @@ docs/screenshots/     desktop and mobile product screenshots
 4. 已完成：Transactional Outbox、多 worker 直接消费、PostgreSQL 租约、fencing token 和故障接管。
 5. 已完成：20 道精选题库、标准化难度/标签、每题至少 6 个隐藏用例和前端组合筛选。
 6. 已完成：Prometheus 应用指标、Grafana 预配 Dashboard、k6 固定负载基准——所有轮次 HTTP 失败 0、逻辑失败 0、掉迭代 0。
+7. 已完成：`Idempotency-Key` 并发幂等提交、Redis Lua 用户级限流、`429/Retry-After` 协议与低基数 Prometheus 指标。
 
 ## Resume Highlights
 
@@ -400,7 +410,12 @@ docs/screenshots/     desktop and mobile product screenshots
 - 支持 PostgreSQL store 与 Redis Streams queue，同时保留内存实现用于快速测试和本地开发。
 - 通过延迟 `XACK`、三次重试、死信流和 `XAUTOCLAIM` 实现至少一次任务处理与故障恢复。
 - 使用 Transactional Outbox 解决 PostgreSQL 与 Redis 双写一致性，并通过租约与 fencing token 拒绝重复执行的迟到结果。
+- 使用 PostgreSQL 部分唯一索引与请求指纹保证提交幂等，通过 Redis Lua 令牌桶在多 API 实例间执行原子用户级限流。
 - 将 Redis Consumer Group 下沉到 judge worker，支持 `docker compose --scale worker=N` 横向扩展。
 - 使用 HttpOnly Cookie + 服务端 Session 实现可撤销登录态，提交记录绑定用户并按 AC 去重题目聚合排行榜。
 - 使用 Next.js + Monaco 构建桌面分栏、移动标签式判题工作台，并以 Playwright 覆盖 Go/C++/Python 浏览器端到端流程。
 - 设计 20+2 分层题库，以 PostgreSQL 标准化标签、幂等种子迁移和隐藏用例完整性测试保证可维护性。
+
+## License
+
+[MIT](LICENSE)

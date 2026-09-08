@@ -1,5 +1,5 @@
 import { Trend } from 'k6/metrics';
-import { createSubmission, pollUntilTerminal, findSumProblem } from './lib/client.js';
+import { createSubmission, pollUntilTerminal, findSumProblem, ensureAuthenticated } from './lib/client.js';
 import { byLanguage } from './lib/programs.js';
 
 const judgeTerminalDuration = new Trend('judge_terminal_duration');
@@ -9,6 +9,7 @@ const judgeTerminalDuration = new Trend('judge_terminal_duration');
 const languages = ['python'];
 
 export const options = {
+  noCookiesReset: true,
   scenarios: {
     constant_load: {
       executor: 'constant-arrival-rate',
@@ -26,6 +27,7 @@ export const options = {
 };
 
 export default function () {
+  if (!ensureAuthenticated()) return;
   const problem = findSumProblem();
   if (!problem) return;
 

@@ -3,6 +3,7 @@ package objectstore
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"io"
 
 	"github.com/minio/minio-go/v7"
@@ -15,6 +16,17 @@ type MinIOConfig struct {
 	SecretKey string
 	Bucket    string
 	UseSSL    bool
+}
+
+func (s *MinIO) Ping(ctx context.Context) error {
+	exists, err := s.client.BucketExists(ctx, s.bucket)
+	if err != nil {
+		return err
+	}
+	if !exists {
+		return fmt.Errorf("bucket %q does not exist", s.bucket)
+	}
+	return nil
 }
 
 type MinIO struct {

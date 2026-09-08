@@ -2,11 +2,14 @@ package store_test
 
 import (
 	"context"
+	"errors"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
-	"github.com/kai/codingjudge/internal/domain"
-	"github.com/kai/codingjudge/internal/store"
+	"github.com/kaii9/codingJudge/internal/domain"
+	"github.com/kaii9/codingJudge/internal/store"
 )
 
 func TestMemoryStoreCreatesQueuedSubmission(t *testing.T) {
@@ -41,6 +44,74 @@ func TestMemoryStoreCreatesQueuedSubmission(t *testing.T) {
 	}
 	if got.ProblemID != "sum" || got.Language != domain.LanguageGo {
 		t.Fatalf("stored submission = %+v", got)
+	}
+}
+
+func TestMemoryStoreCreatesIdempotentSubmissionOnceConcurrently(t *testing.T) {
+	t.Parallel()
+	st := store.NewMemoryStore([]domain.Problem{{ID: "sum"}})
+	ctx := context.Background()
+	const callers = 20
+	results := make(chan domain.Submission, callers)
+	replayed := make(chan bool, callers)
+	errs := make(chan error, callers)
+	var wg sync.WaitGroup
+	for range callers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			sub, wasReplay, err := st.CreateSubmissionIdempotent(ctx, domain.Submission{
+				UserID: "user-1", ProblemID: "sum", Language: domain.LanguageGo, Code: "code",
+			}, "request-1", strings.Repeat("a", 64))
+			results <- sub
+			replayed <- wasReplay
+			errs <- err
+		}()
+	}
+	wg.Wait()
+	close(results)
+	close(replayed)
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	var id string
+	for sub := range results {
+		if id == "" {
+			id = sub.ID
+		}
+		if sub.ID != id {
+			t.Fatalf("submission ID = %q, want %q", sub.ID, id)
+		}
+	}
+	replayCount := 0
+	for wasReplay := range replayed {
+		if wasReplay {
+			replayCount++
+		}
+	}
+	if replayCount != callers-1 {
+		t.Fatalf("replayed = %d, want %d", replayCount, callers-1)
+	}
+	subs, err := st.ListSubmissions(ctx)
+	if err != nil || len(subs) != 1 {
+		t.Fatalf("submissions=%+v err=%v", subs, err)
+	}
+}
+
+func TestMemoryStoreRejectsIdempotencyHashMismatch(t *testing.T) {
+	t.Parallel()
+	st := store.NewMemoryStore([]domain.Problem{{ID: "sum"}})
+	ctx := context.Background()
+	_, _, err := st.CreateSubmissionIdempotent(ctx, domain.Submission{UserID: "user-1", ProblemID: "sum"}, "request-1", strings.Repeat("a", 64))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _, err = st.CreateSubmissionIdempotent(ctx, domain.Submission{UserID: "user-1", ProblemID: "sum"}, "request-1", strings.Repeat("b", 64))
+	if !errors.Is(err, store.ErrIdempotencyConflict) {
+		t.Fatalf("error=%v, want ErrIdempotencyConflict", err)
 	}
 }
 

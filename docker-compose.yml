@@ -11,17 +11,20 @@ services:
       MINIO_SECRET_KEY: "minioadmin"
       MINIO_BUCKET: "codingjudge-assets"
       MINIO_USE_SSL: "false"
+      COOKIE_SECURE: "false"
+      SUBMISSION_RATE_LIMIT_PER_MINUTE: "${SUBMISSION_RATE_LIMIT_PER_MINUTE:-10}"
+      SUBMISSION_RATE_LIMIT_BURST: "${SUBMISSION_RATE_LIMIT_BURST:-3}"
     ports:
       - "18080:8080"
     depends_on:
-      postgres:
-        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
       redis:
         condition: service_healthy
       minio:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/healthz"]
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/readyz"]
       interval: 5s
       timeout: 3s
       retries: 20
@@ -51,6 +54,19 @@ services:
       timeout: 3s
       retries: 20
 
+  judge-images:
+    build: .
+    command:
+      - sh
+      - -ec
+      - |
+        for image in golang:1.25-alpine python:3.12-alpine gcc:13; do
+          docker image inspect "$$image" >/dev/null 2>&1 || docker pull "$$image"
+        done
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    restart: "no"
+
   worker:
     build: .
     command: ["/app/worker"]
@@ -70,8 +86,10 @@ services:
       MINIO_BUCKET: "codingjudge-assets"
       MINIO_USE_SSL: "false"
     depends_on:
-      postgres:
-        condition: service_healthy
+      judge-images:
+        condition: service_completed_successfully
+      migrate:
+        condition: service_completed_successfully
       redis:
         condition: service_healthy
       minio:
@@ -100,10 +118,20 @@ services:
     volumes:
       - ./testdata/cases:/cases:ro
     depends_on:
-      postgres:
-        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
       minio:
         condition: service_healthy
+
+  migrate:
+    build: .
+    command: ["/app/migrate", "-dir", "/app/migrations"]
+    environment:
+      DATABASE_URL: "postgres://codingjudge:codingjudge@postgres:5432/codingjudge?sslmode=disable"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
 
   prometheus:
     image: prom/prometheus:v3.13.0
@@ -134,7 +162,6 @@ services:
       - "15432:5432"
     volumes:
       - postgres-data:/var/lib/postgresql/data
-      - ./migrations:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U codingjudge -d codingjudge"]
       interval: 5s

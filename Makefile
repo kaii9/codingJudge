@@ -2,7 +2,7 @@ GOCACHE_DIR := $(CURDIR)/.cache/go-build
 
 JUDGE_IMAGES := golang:1.25-alpine python:3.12-alpine gcc:13
 
-.PHONY: test frontend-deps frontend-test frontend-build test-all build run-api run-worker upload-cases judge-images compose-up compose-down compose-config migrate-reliable-workers migrate-hot20 fault-test smoke-minio-assets
+.PHONY: test frontend-deps frontend-test frontend-build test-all build run-api run-worker upload-cases judge-images compose-up compose-down compose-config migrate migrate-reliable-workers migrate-hot20 fault-test smoke-minio-assets
 
 test:
 	mkdir -p $(GOCACHE_DIR)
@@ -26,6 +26,7 @@ build:
 	go build -o bin/api ./cmd/api
 	go build -o bin/worker ./cmd/worker
 	go build -o bin/upload-cases ./cmd/upload-cases
+	go build -o bin/migrate ./cmd/migrate
 
 run-api:
 	go run ./cmd/api
@@ -52,11 +53,12 @@ compose-config:
 	docker compose config --quiet
 	@! docker compose config | grep -E 'WORKER_URL|WORKER_ADDR'
 
-migrate-reliable-workers:
-	docker compose exec -T postgres psql -U codingjudge -d codingjudge -v ON_ERROR_STOP=1 -f /docker-entrypoint-initdb.d/003_reliable_workers.sql
+migrate:
+	DATABASE_URL="$${DATABASE_URL:-postgres://codingjudge:codingjudge@localhost:15432/codingjudge?sslmode=disable}" go run ./cmd/migrate -dir migrations
 
-migrate-hot20:
-	docker compose exec -T postgres psql -U codingjudge -d codingjudge -v ON_ERROR_STOP=1 -f /docker-entrypoint-initdb.d/004_hot20_problem_set.sql
+migrate-reliable-workers: migrate
+
+migrate-hot20: migrate
 
 fault-test:
 	bash scripts/fault-test.sh
@@ -79,6 +81,10 @@ load-smoke:
 	docker compose --profile loadtest run --rm k6 k6 run /scripts/problems.js --env CJ_VUS=1 --env CJ_DURATION=30s --summary-export=/results/smoke-problems-$$(date +%s).json
 
 load-baseline:
+	@set -eu; \
+	cleanup() { docker compose up -d api >/dev/null; }; \
+	trap cleanup EXIT INT TERM; \
+	SUBMISSION_RATE_LIMIT_PER_MINUTE=100000 SUBMISSION_RATE_LIMIT_BURST=1000 docker compose up -d api; \
 	docker compose --profile loadtest run --rm k6 k6 run /scripts/mixed.js --env CJ_VUS=20 --env CJ_DURATION=2m --env CJ_JUDGE_TIMEOUT_SECONDS=60 --summary-export=/results/baseline-$$(date +%s).json
 
 load-worker-scale:
