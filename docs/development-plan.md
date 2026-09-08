@@ -171,13 +171,13 @@ Acceptance:
 
 ## Phase 8: Observability and Load Testing
 
-Status: implemented. Fixed-load benchmark (1 req/s, 120+ iterations): all rounds pass strict validation with 0 HTTP failures, 0 logical failures, and 0 dropped iterations. Pending returns to 0 after each round.
+Status: implemented. The fixed-load benchmark passes strict validation. A repeated saturation benchmark now runs three balanced-order trials for each of 1/2/4 workers; all 540 measured submissions were accepted and every round drained Redis to zero. Median throughput improved only from 2.939/s to 3.344/s at four workers (1.14x, 28.4% efficiency), exposing the shared sandbox execution layer as the next capacity constraint.
 
 Goal: add application-level Prometheus metrics, a provisioned Grafana dashboard, and reproducible k6 benchmarks comparing one, two, and four judge workers.
 
 Tasks:
 
-- Add 16 codingjudge_-prefixed application metrics with bounded labels.
+- Add codingjudge_-prefixed application metrics with bounded labels, including sandbox `compile/run` duration and outcomes.
 - Instrument HTTP, submission creation, outbox, Redis queue, worker lifecycle and judge cases.
 - Serve worker metrics on port 9091 and sample Redis Pending gauge from the API.
 - Add Prometheus Compose service with DNS-based worker discovery and recording rules.
@@ -193,6 +193,7 @@ Acceptance:
 - API and judging remain functional while Prometheus and Grafana are stopped.
 - k6 smoke and baseline thresholds pass.
 - A reproducible 1/2/4 worker report contains machine metadata and measured values.
+- Repeated saturation runs preserve individual results and report medians without claiming linear scaling.
 
 ## Phase 9: Product Extensions
 
@@ -236,13 +237,14 @@ Acceptance:
 
 ## Current Development Slice
 
-The backend MVP, browser demo, reliable multi-worker phase, curated problem library, observability/load testing, authentication, MinIO assets, and submission admission control are complete. The next recommended slice is cursor pagination plus a unified OpenAPI/error contract.
+The backend MVP, browser demo, reliable multi-worker phase, curated problem library, observability/load testing, authentication, MinIO assets, and submission admission control are complete. The next recommended slice is separating sandbox execution capacity from the shared local Docker daemon and validating it on independent executor nodes. Cursor pagination plus a unified OpenAPI/error contract follows that capacity work.
 
 Reason:
 
 - The API, PostgreSQL persistence, Redis reliability and Docker sandbox have been exercised together through Compose.
 - PostgreSQL outbox, leases and fencing tokens protect dual writes and stale workers.
 - Redis consumption runs directly in horizontally scalable judge workers.
+- Repeated saturation testing shows that adding local worker consumers alone is insufficient when all of them launch sandboxes through one Docker daemon.
 - Go, C++ and Python accepted submissions have passed end-to-end.
 - Wrong answer, runtime error, timeout and dead-letter paths have been exercised end-to-end.
 - The Next.js workbench supports problem navigation, Monaco editing, status polling and submission history.

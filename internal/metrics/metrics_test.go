@@ -29,6 +29,7 @@ func TestAllTargetMetricsRegistered(t *testing.T) {
 	app.WorkerDeadLetter()
 	app.WorkerLeaseTakeover()
 	app.ObserveJudgeCase("go", "accepted", 15*time.Millisecond)
+	app.ObserveSandboxExecution("go", "run", "success", 12*time.Millisecond)
 
 	families, err := registry.Gather()
 	if err != nil {
@@ -63,6 +64,7 @@ func TestAllTargetMetricsRegistered(t *testing.T) {
 		"codingjudge_worker_lease_takeovers_total",
 		"codingjudge_judge_cases_total",
 		"codingjudge_judge_case_duration_seconds",
+		"codingjudge_sandbox_execution_duration_seconds",
 	}
 
 	for _, name := range required {

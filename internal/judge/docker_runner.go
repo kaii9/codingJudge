@@ -55,6 +55,21 @@ func (b *limitedBuffer) Truncated() bool {
 type DockerRunner struct {
 	image       string
 	workDirRoot string
+	metrics     SandboxMetrics
+}
+
+// SandboxMetrics records the duration and outcome of each isolated Docker
+// execution. Labels are deliberately bounded to language, stage, and result.
+type SandboxMetrics interface {
+	ObserveSandboxExecution(language, stage, result string, duration time.Duration)
+}
+
+type DockerRunnerOption func(*DockerRunner)
+
+func WithSandboxMetrics(metrics SandboxMetrics) DockerRunnerOption {
+	return func(r *DockerRunner) {
+		r.metrics = metrics
+	}
 }
 
 type CompileRequest struct {
@@ -66,8 +81,12 @@ func NewDockerRunner(image string) *DockerRunner {
 	return NewDockerRunnerWithWorkDir(image, "")
 }
 
-func NewDockerRunnerWithWorkDir(image, workDirRoot string) *DockerRunner {
-	return &DockerRunner{image: image, workDirRoot: workDirRoot}
+func NewDockerRunnerWithWorkDir(image, workDirRoot string, options ...DockerRunnerOption) *DockerRunner {
+	runner := &DockerRunner{image: image, workDirRoot: workDirRoot}
+	for _, option := range options {
+		option(runner)
+	}
+	return runner
 }
 
 func (r *DockerRunner) Run(ctx context.Context, req RunRequest) (RunResult, error) {
@@ -105,8 +124,10 @@ func (r *DockerRunner) RunBatch(ctx context.Context, req RunRequest, inputs []st
 			compileArgs = replaceImage(compileArgs, r.image)
 		}
 		compileCtx, cancelCompile := context.WithTimeout(ctx, 10*time.Second)
+		started := time.Now()
 		compileResult, err := executeDocker(compileCtx, compileArgs)
 		cancelCompile()
+		r.observeSandbox(req.Language, StageCompile, compileResult, err, time.Since(started))
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
 		}
@@ -152,12 +173,34 @@ func (r *DockerRunner) runPrepared(ctx context.Context, req RunRequest, workdir 
 	if r.image != "" {
 		args = replaceImage(args, r.image)
 	}
+	started := time.Now()
 	result, err := executeDocker(runCtx, args)
 	result.Stage = StageRun
+	r.observeSandbox(req.Language, StageRun, result, err, time.Since(started))
 	if ctx.Err() != nil {
 		return result, ctx.Err()
 	}
 	return result, err
+}
+
+func (r *DockerRunner) observeSandbox(language domain.Language, stage RunStage, result RunResult, err error, duration time.Duration) {
+	if r.metrics == nil {
+		return
+	}
+	r.metrics.ObserveSandboxExecution(string(language), string(stage), sandboxMetricResult(result, err), duration)
+}
+
+func sandboxMetricResult(result RunResult, err error) string {
+	if err != nil {
+		return "infrastructure_error"
+	}
+	if result.TimedOut {
+		return "timeout"
+	}
+	if result.ExitCode != 0 {
+		return "nonzero_exit"
+	}
+	return "success"
 }
 
 func executeDocker(ctx context.Context, args []string) (RunResult, error) {

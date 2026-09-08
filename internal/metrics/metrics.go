@@ -26,6 +26,7 @@ type App struct {
 	workerTakeovers       prometheus.Counter
 	judgeCasesTotal       *prometheus.CounterVec
 	judgeDuration         *prometheus.HistogramVec
+	sandboxDuration       *prometheus.HistogramVec
 }
 
 // New creates a metrics.App and registers every collector into reg.
@@ -52,6 +53,7 @@ func New(reg prometheus.Registerer) *App {
 		m.workerTakeovers,
 		m.judgeCasesTotal,
 		m.judgeDuration,
+		m.sandboxDuration,
 	)
 	return m
 }
@@ -151,6 +153,12 @@ func newApp() *App {
 			Help:    "Test case evaluation latency in seconds.",
 			Buckets: []float64{0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5},
 		}, []string{"language"}),
+
+		sandboxDuration: prometheus.NewHistogramVec(prometheus.HistogramOpts{
+			Name:    "codingjudge_sandbox_execution_duration_seconds",
+			Help:    "Docker sandbox execution latency by compile or run stage.",
+			Buckets: []float64{0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10},
+		}, []string{"language", "stage", "result"}),
 	}
 }
 
@@ -228,6 +236,10 @@ func (m *App) ObserveJudgeCase(language, result string, duration time.Duration) 
 	m.judgeDuration.WithLabelValues(language).Observe(duration.Seconds())
 }
 
+func (m *App) ObserveSandboxExecution(language, stage, result string, duration time.Duration) {
+	m.sandboxDuration.WithLabelValues(language, stage, result).Observe(duration.Seconds())
+}
+
 func statusClass(status int) string {
 	switch {
 	case status >= 500:
@@ -261,6 +273,7 @@ func (m *App) Describe(ch chan<- *prometheus.Desc) {
 	m.workerTakeovers.Describe(ch)
 	m.judgeCasesTotal.Describe(ch)
 	m.judgeDuration.Describe(ch)
+	m.sandboxDuration.Describe(ch)
 }
 
 // Collect gathers metric values from all registered metrics.
@@ -283,4 +296,5 @@ func (m *App) Collect(ch chan<- prometheus.Metric) {
 	m.workerTakeovers.Collect(ch)
 	m.judgeCasesTotal.Collect(ch)
 	m.judgeDuration.Collect(ch)
+	m.sandboxDuration.Collect(ch)
 }

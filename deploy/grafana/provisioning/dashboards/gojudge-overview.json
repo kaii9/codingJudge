@@ -157,6 +157,20 @@
       "fieldConfig": {"defaults": {"unit": "s"}},
       "targets": [{"expr": "histogram_quantile(0.95, sum by (le, language) (rate(codingjudge_judge_case_duration_seconds_bucket[5m])))", "refId": "A", "legendFormat": "{{language}}"}],
       "gridPos": {"h": 8, "w": 12, "x": 12, "y": 52}
+    },
+    {
+      "title": "Sandbox execution P95 by stage",
+      "type": "timeseries",
+      "fieldConfig": {"defaults": {"unit": "s"}},
+      "targets": [{"expr": "histogram_quantile(0.95, sum by (le, language, stage) (rate(codingjudge_sandbox_execution_duration_seconds_bucket[5m])))", "refId": "A", "legendFormat": "{{language}} {{stage}}"}],
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 60}
+    },
+    {
+      "title": "Sandbox outcomes rate",
+      "type": "timeseries",
+      "fieldConfig": {"defaults": {"unit": "reqps"}},
+      "targets": [{"expr": "sum by (stage, result) (rate(codingjudge_sandbox_execution_duration_seconds_count[5m]))", "refId": "A", "legendFormat": "{{stage}} {{result}}"}],
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 60}
     }
   ],
   "time": {"from": "now-15m", "to": "now"},

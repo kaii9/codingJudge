@@ -72,7 +72,8 @@ func main() {
 		slog.Info("worker object store enabled", "endpoint", cfg.MinIOEndpoint, "bucket", cfg.MinIOBucket)
 	}
 
-	service := judge.NewService(judge.NewDockerRunnerWithWorkDir(cfg.JudgeImage, cfg.JudgeWorkdir), judge.WithMetrics(metricsApp))
+	runner := judge.NewDockerRunnerWithWorkDir(cfg.JudgeImage, cfg.JudgeWorkdir, judge.WithSandboxMetrics(metricsApp))
+	service := judge.NewService(runner, judge.WithMetrics(metricsApp))
 	slots := make([]judgeworker.Slot, 0, cfg.Concurrency)
 	for index := 0; index < cfg.Concurrency; index++ {
 		consumerID := fmt.Sprintf("%s-slot-%d", cfg.WorkerID, index+1)

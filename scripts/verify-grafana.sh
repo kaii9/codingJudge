@@ -39,4 +39,15 @@ for row in "API" "Queue / Outbox" "Worker" "Judge"; do
   fi
 done
 
+echo "==> Checking sandbox diagnostic panels..."
+PANELS=$(curl -fsS -u "${USER}:${PASS}" "${GRAFANA_URL}/api/dashboards/uid/gojudge-overview" | jq -r '[.dashboard.panels[] | .title] | join("|")')
+for panel in "Sandbox execution P95 by stage" "Sandbox outcomes rate"; do
+  if echo "$PANELS" | grep -qF "$panel"; then
+    echo "  panel '$panel' OK"
+  else
+    echo "FAIL: missing panel '$panel'"
+    exit 1
+  fi
+done
+
 echo "Grafana verification passed."

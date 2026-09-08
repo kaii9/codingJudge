@@ -1,17 +1,68 @@
 package judge
 
 import (
+	"errors"
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/kaii9/codingJudge/internal/domain"
 )
+
+type fakeSandboxMetrics struct {
+	language string
+	stage    string
+	result   string
+	duration time.Duration
+}
+
+func (m *fakeSandboxMetrics) ObserveSandboxExecution(language, stage, result string, duration time.Duration) {
+	m.language = language
+	m.stage = stage
+	m.result = result
+	m.duration = duration
+}
 
 func TestDockerRunnerSupportsBatchExecution(t *testing.T) {
 	t.Parallel()
 
 	var _ BatchRunner = (*DockerRunner)(nil)
+}
+
+func TestDockerRunnerRecordsBoundedSandboxOutcome(t *testing.T) {
+	t.Parallel()
+
+	metrics := &fakeSandboxMetrics{}
+	runner := NewDockerRunnerWithWorkDir("", "", WithSandboxMetrics(metrics))
+	runner.observeSandbox(domain.LanguagePython, StageRun, RunResult{}, nil, 25*time.Millisecond)
+	if metrics.language != "python" || metrics.stage != "run" || metrics.result != "success" || metrics.duration != 25*time.Millisecond {
+		t.Fatalf("sandbox metric = %+v", metrics)
+	}
+}
+
+func TestSandboxMetricResult(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name   string
+		result RunResult
+		err    error
+		want   string
+	}{
+		{name: "success", want: "success"},
+		{name: "timeout", result: RunResult{TimedOut: true}, want: "timeout"},
+		{name: "nonzero exit", result: RunResult{ExitCode: 2}, want: "nonzero_exit"},
+		{name: "infrastructure error wins", result: RunResult{TimedOut: true}, err: errors.New("daemon unavailable"), want: "infrastructure_error"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := sandboxMetricResult(tt.result, tt.err); got != tt.want {
+				t.Fatalf("sandboxMetricResult() = %q, want %q", got, tt.want)
+			}
+		})
+	}
 }
 
 func TestDockerArgsWithName(t *testing.T) {

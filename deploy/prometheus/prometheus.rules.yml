@@ -15,3 +15,6 @@ groups:
 
       - record: codingjudge:worker_job_duration:p95
         expr: histogram_quantile(0.95, sum by (le) (rate(codingjudge_worker_job_duration_seconds_bucket[5m])))
+
+      - record: codingjudge:sandbox_execution_duration:p95
+        expr: histogram_quantile(0.95, sum by (le) (rate(codingjudge_sandbox_execution_duration_seconds_bucket[5m])))

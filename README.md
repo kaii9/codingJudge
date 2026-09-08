@@ -321,7 +321,7 @@ API 和每个 worker 都在独立端口暴露 Prometheus 指标（API: `:8080/me
 make observability-up
 ```
 
-Grafana 预配 Dashboard（UID `gojudge-overview`）包含 API、Queue/Outbox、Worker、Judge 四个行，内置 HTTP 吞吐/延迟/错误、幂等命中与限流拒绝、队列深度、worker 并发度和判题用例耗时面板。默认凭据 admin/admin。
+Grafana 预配 Dashboard（UID `gojudge-overview`）包含 API、Queue/Outbox、Worker、Judge 四个行，内置 HTTP 吞吐/延迟/错误、幂等命中与限流拒绝、队列深度、worker 并发度、判题用例耗时，以及按 `compile/run` 和结果拆分的 sandbox 执行耗时面板。默认凭据 admin/admin。
 
 验证配置：
 
