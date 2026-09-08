@@ -89,6 +89,18 @@ func NewDockerRunnerWithWorkDir(image, workDirRoot string, options ...DockerRunn
 	return runner
 }
 
+func (r *DockerRunner) Ping(ctx context.Context) error {
+	output, err := exec.CommandContext(ctx, "docker", "version", "--format", "{{.Server.Version}}").CombinedOutput()
+	if err != nil {
+		message := strings.TrimSpace(string(output))
+		if message != "" {
+			return fmt.Errorf("docker daemon readiness: %w: %s", err, message)
+		}
+		return fmt.Errorf("docker daemon readiness: %w", err)
+	}
+	return nil
+}
+
 func (r *DockerRunner) Run(ctx context.Context, req RunRequest) (RunResult, error) {
 	results, err := r.RunBatch(ctx, req, []string{req.Input})
 	if err != nil {

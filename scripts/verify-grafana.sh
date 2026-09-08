@@ -30,7 +30,7 @@ fi
 
 echo "==> Checking row titles..."
 ROWS=$(curl -fsS -u "${USER}:${PASS}" "${GRAFANA_URL}/api/dashboards/uid/gojudge-overview" | jq -r '[.dashboard.panels[] | select(.type=="row") | .title] | join(" ")')
-for row in "API" "Queue / Outbox" "Worker" "Judge"; do
+for row in "API" "Queue / Outbox" "Worker" "Judge" "Executor"; do
   if echo "$ROWS" | grep -qF "$row"; then
     echo "  row '$row' OK"
   else
@@ -41,7 +41,7 @@ done
 
 echo "==> Checking sandbox diagnostic panels..."
 PANELS=$(curl -fsS -u "${USER}:${PASS}" "${GRAFANA_URL}/api/dashboards/uid/gojudge-overview" | jq -r '[.dashboard.panels[] | .title] | join("|")')
-for panel in "Sandbox execution P95 by stage" "Sandbox outcomes rate"; do
+for panel in "Sandbox execution P95 by stage" "Sandbox outcomes rate" "Executor slot utilization" "Executor queue wait P95" "Executor execution rate"; do
   if echo "$PANELS" | grep -qF "$panel"; then
     echo "  panel '$panel' OK"
   else

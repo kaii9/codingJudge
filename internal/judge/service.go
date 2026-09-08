@@ -24,12 +24,12 @@ const (
 )
 
 type RunResult struct {
-	Stdout   string
-	Stderr   string
-	ExitCode int
-	Duration int64
-	TimedOut bool
-	Stage    RunStage
+	Stdout   string   `json:"stdout"`
+	Stderr   string   `json:"stderr"`
+	ExitCode int      `json:"exitCode"`
+	Duration int64    `json:"durationMs"`
+	TimedOut bool     `json:"timedOut"`
+	Stage    RunStage `json:"stage"`
 }
 
 type Runner interface {

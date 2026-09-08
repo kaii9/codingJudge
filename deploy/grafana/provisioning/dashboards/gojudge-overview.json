@@ -171,6 +171,33 @@
       "fieldConfig": {"defaults": {"unit": "reqps"}},
       "targets": [{"expr": "sum by (stage, result) (rate(codingjudge_sandbox_execution_duration_seconds_count[5m]))", "refId": "A", "legendFormat": "{{stage}} {{result}}"}],
       "gridPos": {"h": 8, "w": 12, "x": 12, "y": 60}
+    },
+    {
+      "type": "row",
+      "title": "Executor",
+      "collapsed": false,
+      "gridPos": {"h": 1, "w": 24, "x": 0, "y": 68}
+    },
+    {
+      "title": "Executor slot utilization",
+      "type": "timeseries",
+      "fieldConfig": {"defaults": {"unit": "percentunit", "min": 0, "max": 1}},
+      "targets": [{"expr": "sum(codingjudge_executor_executions_in_flight{job=\"codingjudge-executor\"}) / clamp_min(sum(codingjudge_executor_slots{job=\"codingjudge-executor\"}), 1)", "refId": "A"}],
+      "gridPos": {"h": 8, "w": 8, "x": 0, "y": 69}
+    },
+    {
+      "title": "Executor queue wait P95",
+      "type": "timeseries",
+      "fieldConfig": {"defaults": {"unit": "s"}},
+      "targets": [{"expr": "histogram_quantile(0.95, sum by (le) (rate(codingjudge_executor_queue_duration_seconds_bucket{job=\"codingjudge-executor\"}[5m])))", "refId": "A"}],
+      "gridPos": {"h": 8, "w": 8, "x": 8, "y": 69}
+    },
+    {
+      "title": "Executor execution rate",
+      "type": "timeseries",
+      "fieldConfig": {"defaults": {"unit": "reqps"}},
+      "targets": [{"expr": "sum by (result) (rate(codingjudge_executor_executions_total{job=\"codingjudge-executor\"}[5m]))", "refId": "A", "legendFormat": "{{result}}"}],
+      "gridPos": {"h": 8, "w": 8, "x": 16, "y": 69}
     }
   ],
   "time": {"from": "now-15m", "to": "now"},

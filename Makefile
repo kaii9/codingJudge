@@ -25,6 +25,7 @@ test-all: test
 build:
 	go build -o bin/api ./cmd/api
 	go build -o bin/worker ./cmd/worker
+	go build -o bin/executor ./cmd/executor
 	go build -o bin/upload-cases ./cmd/upload-cases
 	go build -o bin/migrate ./cmd/migrate
 

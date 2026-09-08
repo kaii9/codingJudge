@@ -10,6 +10,7 @@ import (
 	"syscall"
 
 	"github.com/kaii9/codingJudge/internal/config"
+	"github.com/kaii9/codingJudge/internal/executor"
 	"github.com/kaii9/codingJudge/internal/judge"
 	"github.com/kaii9/codingJudge/internal/judgeworker"
 	"github.com/kaii9/codingJudge/internal/metrics"
@@ -72,7 +73,18 @@ func main() {
 		slog.Info("worker object store enabled", "endpoint", cfg.MinIOEndpoint, "bucket", cfg.MinIOBucket)
 	}
 
-	runner := judge.NewDockerRunnerWithWorkDir(cfg.JudgeImage, cfg.JudgeWorkdir, judge.WithSandboxMetrics(metricsApp))
+	var runner judge.Runner
+	if cfg.ExecutorURL != "" {
+		runner, err = executor.NewClient(cfg.ExecutorURL, cfg.ExecutorToken, cfg.ExecutorTimeout)
+		if err != nil {
+			slog.Error("remote executor setup failed", "error", err)
+			os.Exit(1)
+		}
+		slog.Info("remote executor enabled", "url", cfg.ExecutorURL, "timeout", cfg.ExecutorTimeout)
+	} else {
+		runner = judge.NewDockerRunnerWithWorkDir(cfg.JudgeImage, cfg.JudgeWorkdir, judge.WithSandboxMetrics(metricsApp))
+		slog.Warn("using local Docker runner; configure EXECUTOR_URL for process isolation")
+	}
 	service := judge.NewService(runner, judge.WithMetrics(metricsApp))
 	slots := make([]judgeworker.Slot, 0, cfg.Concurrency)
 	for index := 0; index < cfg.Concurrency; index++ {

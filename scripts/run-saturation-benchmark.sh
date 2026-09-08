@@ -123,7 +123,7 @@ validate_summary() {
 mkdir -p "$RESULTS" "$(dirname "$REPORT")"
 
 info "building backend and judge images..."
-docker compose build api worker migrate judge-images
+docker compose build api worker executor migrate judge-images
 
 DOCKER_VERSION=$(docker version --format '{{.Server.Version}}' 2>/dev/null || echo unknown)
 MEMORY=$(sysctl -n hw.memsize 2>/dev/null | awk '{printf "%.0f GB", $1/1024/1024/1024}' || echo unknown)

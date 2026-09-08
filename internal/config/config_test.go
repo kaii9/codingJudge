@@ -209,6 +209,55 @@ func TestLoadWorkerRejectsMalformedMetricsAddr(t *testing.T) {
 	}
 }
 
+func TestLoadWorkerReadsRemoteExecutorConfig(t *testing.T) {
+	t.Parallel()
+	values := map[string]string{
+		"DATABASE_URL":     "postgres://db",
+		"REDIS_ADDR":       "redis:6379",
+		"EXECUTOR_URL":     "http://executor:8090",
+		"EXECUTOR_TOKEN":   "internal-secret",
+		"EXECUTOR_TIMEOUT": "90s",
+	}
+	cfg, err := config.LoadWorker(func(key string) string { return values[key] })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.ExecutorURL != "http://executor:8090" || cfg.ExecutorToken != "internal-secret" || cfg.ExecutorTimeout != 90*time.Second {
+		t.Fatalf("executor config = %+v", cfg)
+	}
+}
+
+func TestLoadWorkerRejectsPartialRemoteExecutorConfig(t *testing.T) {
+	t.Parallel()
+	values := map[string]string{
+		"DATABASE_URL": "postgres://db",
+		"REDIS_ADDR":   "redis:6379",
+		"EXECUTOR_URL": "http://executor:8090",
+	}
+	if _, err := config.LoadWorker(func(key string) string { return values[key] }); err == nil {
+		t.Fatal("LoadWorker should reject executor URL without token")
+	}
+}
+
+func TestLoadExecutorDefaultsAndValidation(t *testing.T) {
+	t.Parallel()
+	cfg, err := config.LoadExecutor(func(key string) string {
+		if key == "EXECUTOR_TOKEN" {
+			return "internal-secret"
+		}
+		return ""
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Addr != ":8090" || cfg.MaxConcurrency != 2 || cfg.ShutdownGrace != 30*time.Second {
+		t.Fatalf("executor defaults = %+v", cfg)
+	}
+	if _, err := config.LoadExecutor(func(string) string { return "" }); err == nil {
+		t.Fatal("LoadExecutor should require a token")
+	}
+}
+
 func TestValidateAPIRejectsPartialDurableConfiguration(t *testing.T) {
 	t.Parallel()
 	cfg := config.Load(func(key string) string {

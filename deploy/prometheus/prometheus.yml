@@ -16,3 +16,10 @@ scrape_configs:
         type: A
         port: 9091
         refresh_interval: 5s
+
+  - job_name: codingjudge-executor
+    dns_sd_configs:
+      - names: [executor]
+        type: A
+        port: 8090
+        refresh_interval: 5s

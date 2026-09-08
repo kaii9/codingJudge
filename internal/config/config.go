@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"net"
+	"net/url"
 	"os"
 	"strconv"
 	"time"
@@ -99,6 +100,18 @@ type WorkerConfig struct {
 	MinIOSecretKey    string
 	MinIOBucket       string
 	MinIOUseSSL       bool
+	ExecutorURL       string
+	ExecutorToken     string
+	ExecutorTimeout   time.Duration
+}
+
+type ExecutorConfig struct {
+	Addr           string
+	Token          string
+	MaxConcurrency int
+	ShutdownGrace  time.Duration
+	JudgeWorkdir   string
+	JudgeImage     string
 }
 
 func ValidateAPI(cfg Config) error {
@@ -133,6 +146,9 @@ func LoadWorker(getenv func(string) string) (WorkerConfig, error) {
 		MinIOAccessKey:    getenv("MINIO_ACCESS_KEY"),
 		MinIOSecretKey:    getenv("MINIO_SECRET_KEY"),
 		MinIOBucket:       getenv("MINIO_BUCKET"),
+		ExecutorURL:       getenv("EXECUTOR_URL"),
+		ExecutorToken:     getenv("EXECUTOR_TOKEN"),
+		ExecutorTimeout:   2 * time.Minute,
 	}
 	if cfg.DatabaseURL == "" || cfg.RedisAddr == "" {
 		return WorkerConfig{}, fmt.Errorf("DATABASE_URL and REDIS_ADDR are required")
@@ -160,6 +176,9 @@ func LoadWorker(getenv func(string) string) (WorkerConfig, error) {
 	if cfg.ShutdownGrace, err = parsePositiveDuration(getenv("WORKER_SHUTDOWN_GRACE"), cfg.ShutdownGrace); err != nil {
 		return WorkerConfig{}, fmt.Errorf("WORKER_SHUTDOWN_GRACE: %w", err)
 	}
+	if cfg.ExecutorTimeout, err = parsePositiveDuration(getenv("EXECUTOR_TIMEOUT"), cfg.ExecutorTimeout); err != nil {
+		return WorkerConfig{}, fmt.Errorf("EXECUTOR_TIMEOUT: %w", err)
+	}
 	if cfg.HeartbeatInterval >= cfg.LeaseDuration {
 		return WorkerConfig{}, fmt.Errorf("heartbeat interval must be shorter than lease duration")
 	}
@@ -185,6 +204,43 @@ func LoadWorker(getenv func(string) string) (WorkerConfig, error) {
 	}
 	if err := validateMinIOValues(cfg.MinIOEndpoint, cfg.MinIOAccessKey, cfg.MinIOSecretKey); err != nil {
 		return WorkerConfig{}, err
+	}
+	if (cfg.ExecutorURL == "") != (cfg.ExecutorToken == "") {
+		return WorkerConfig{}, fmt.Errorf("EXECUTOR_URL and EXECUTOR_TOKEN must be configured together")
+	}
+	if cfg.ExecutorURL != "" {
+		parsed, err := url.Parse(cfg.ExecutorURL)
+		if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
+			return WorkerConfig{}, fmt.Errorf("EXECUTOR_URL must be an absolute http or https URL")
+		}
+	}
+	return cfg, nil
+}
+
+func LoadExecutor(getenv func(string) string) (ExecutorConfig, error) {
+	cfg := ExecutorConfig{
+		Addr:           ":8090",
+		Token:          getenv("EXECUTOR_TOKEN"),
+		MaxConcurrency: 2,
+		ShutdownGrace:  30 * time.Second,
+		JudgeWorkdir:   getenv("JUDGE_WORKDIR"),
+		JudgeImage:     getenv("JUDGE_IMAGE"),
+	}
+	if value := getenv("EXECUTOR_ADDR"); value != "" {
+		cfg.Addr = value
+	}
+	if cfg.Token == "" {
+		return ExecutorConfig{}, fmt.Errorf("EXECUTOR_TOKEN is required")
+	}
+	if !isValidAddr(cfg.Addr) {
+		return ExecutorConfig{}, fmt.Errorf("EXECUTOR_ADDR %q is not a valid listen address", cfg.Addr)
+	}
+	var err error
+	if cfg.MaxConcurrency, err = parsePositiveInt(getenv("EXECUTOR_MAX_CONCURRENCY"), cfg.MaxConcurrency); err != nil {
+		return ExecutorConfig{}, fmt.Errorf("EXECUTOR_MAX_CONCURRENCY: %w", err)
+	}
+	if cfg.ShutdownGrace, err = parsePositiveDuration(getenv("EXECUTOR_SHUTDOWN_GRACE"), cfg.ShutdownGrace); err != nil {
+		return ExecutorConfig{}, fmt.Errorf("EXECUTOR_SHUTDOWN_GRACE: %w", err)
 	}
 	return cfg, nil
 }

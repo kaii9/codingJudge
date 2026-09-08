@@ -67,6 +67,35 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
     restart: "no"
 
+  executor:
+    build: .
+    command: ["/app/executor"]
+    environment:
+      EXECUTOR_ADDR: ":8090"
+      EXECUTOR_TOKEN: "${EXECUTOR_TOKEN:-codingjudge-dev-executor-token}"
+      EXECUTOR_MAX_CONCURRENCY: "${EXECUTOR_MAX_CONCURRENCY:-2}"
+      EXECUTOR_SHUTDOWN_GRACE: "30s"
+      JUDGE_WORKDIR: "/tmp/codingjudge-sandbox"
+    depends_on:
+      judge-images:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8090/readyz"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /tmp/codingjudge-sandbox:/tmp/codingjudge-sandbox
+    tmpfs:
+      - /tmp
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    stop_grace_period: 35s
+
   worker:
     build: .
     command: ["/app/worker"]
@@ -78,25 +107,24 @@ services:
       JUDGE_HEARTBEAT_INTERVAL: "10s"
       JUDGE_MAX_ATTEMPTS: "3"
       WORKER_SHUTDOWN_GRACE: "30s"
-      JUDGE_WORKDIR: "/tmp/codingjudge-sandbox"
       WORKER_METRICS_ADDR: ":9091"
+      EXECUTOR_URL: "http://executor:8090"
+      EXECUTOR_TOKEN: "${EXECUTOR_TOKEN:-codingjudge-dev-executor-token}"
+      EXECUTOR_TIMEOUT: "120s"
       MINIO_ENDPOINT: "minio:9000"
       MINIO_ACCESS_KEY: "minioadmin"
       MINIO_SECRET_KEY: "minioadmin"
       MINIO_BUCKET: "codingjudge-assets"
       MINIO_USE_SSL: "false"
     depends_on:
-      judge-images:
-        condition: service_completed_successfully
+      executor:
+        condition: service_healthy
       migrate:
         condition: service_completed_successfully
       redis:
         condition: service_healthy
       minio:
         condition: service_healthy
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-      - /tmp/codingjudge-sandbox:/tmp/codingjudge-sandbox
     tmpfs:
       - /tmp
     security_opt:

@@ -4,7 +4,7 @@
 
 GoJudge 是一个后端主导的在线代码评测系统。项目核心围绕一句话：Web 后端只是外壳，真正的难点是安全地运行不可信代码。
 
-当前仓库实现了完整 MVP 主链路：用户注册登录、浏览题目、Monaco 编辑代码、提交 Go/C++/Python、异步判题、轮询结果、查看个人提交历史和全站排行榜。题库包含 20 道原创面试高频题和 2 道 Starter 题，覆盖数组、哈希、滑动窗口、链表、树、图与动态规划。Compose 环境包含 Next.js 前端、Go API、独立 judge worker、PostgreSQL、Redis Streams 和 MinIO；Redis 消费支持成功后确认、三次重试、死信流和 pending 回收。无外部服务的本地测试默认使用内存 store 和内存 queue。
+当前仓库实现了完整 MVP 主链路：用户注册登录、浏览题目、Monaco 编辑代码、提交 Go/C++/Python、异步判题、轮询结果、查看个人提交历史和全站排行榜。题库包含 20 道原创面试高频题和 2 道 Starter 题，覆盖数组、哈希、滑动窗口、链表、树、图与动态规划。Compose 环境包含 Next.js 前端、Go API、judge worker、独立 sandbox executor、PostgreSQL、Redis Streams 和 MinIO；Redis 消费支持成功后确认、三次重试、死信流和 pending 回收。无外部服务的本地测试默认使用内存 store 和内存 queue。
 
 ## Target Stack
 
@@ -15,6 +15,7 @@ Migration: versioned SQL files
 Queue: Redis Streams
 Sandbox: Docker
 Worker: Go judge-worker
+Executor: authenticated internal Go sandbox service
 Storage: MinIO for object-backed test cases and submission artifacts
 Frontend: Next.js + React + Monaco Editor
 Deploy: Docker Compose
@@ -40,11 +41,12 @@ flowchart LR
     WorkerB --> Store
     WorkerA --> MinIO[(MinIO<br/>test-case assets + artifacts)]
     WorkerB --> MinIO
-    WorkerA --> Docker[Docker sandbox<br/>network none, memory/cpu/pids limits]
-    WorkerB --> Docker
+    WorkerA --> Executor[Sandbox executor<br/>Bearer auth + bounded concurrency]
+    WorkerB --> Executor
+    Executor --> Docker[Docker sandbox<br/>network none, memory/cpu/pids limits]
 ```
 
-前端只通过 API 创建和查询提交；API 先通过 Redis Lua 令牌桶执行用户级提交限流，再在一个 PostgreSQL 事务中保存 submission 和 outbox 事件。`Idempotency-Key` 与请求指纹受数据库唯一索引保护，并发重试只会产生一个 submission 和一条 outbox 事件。relay 负责可靠发布到 Redis，但不消费任务。多个 worker 直接通过同一 Consumer Group 抢任务，Docker 沙箱只在 worker 中执行。数据库字段实现应用层租约和 fencing token 防护，决定最终写权限，避免重复消息或旧 worker 的迟到结果覆盖新结果。MinIO 承载 object-backed 测试用例文件和提交源码/stdout/stderr artifact，PostgreSQL 保存 object key、size 和 SHA256 metadata。
+前端只通过 API 创建和查询提交；API 先通过 Redis Lua 令牌桶执行用户级提交限流，再在一个 PostgreSQL 事务中保存 submission 和 outbox 事件。`Idempotency-Key` 与请求指纹受数据库唯一索引保护，并发重试只会产生一个 submission 和一条 outbox 事件。relay 负责可靠发布到 Redis，但不消费任务。多个 worker 直接通过同一 Consumer Group 抢任务，通过带 Bearer Token 的内部 HTTP 协议请求有并发上限的 executor；worker 不再挂载 Docker Socket。数据库字段实现应用层租约和 fencing token 防护，决定最终写权限，避免重复消息或旧 worker 的迟到结果覆盖新结果。MinIO 承载 object-backed 测试用例文件和提交源码/stdout/stderr artifact，PostgreSQL 保存 object key、size 和 SHA256 metadata。
 
 ## Quick Start
 
@@ -60,7 +62,7 @@ make test
 make compose-up
 ```
 
-Compose 会在 Worker 启动前检查并拉取 Go、Python 和 GCC 判题镜像，避免首次判题时把镜像下载时间计入编译或运行时限。`make compose-up` 也会在构建前做同样的预检。
+Compose 会在 executor 和 worker 启动前检查并拉取 Go、Python 和 GCC 判题镜像，避免首次判题时把镜像下载时间计入编译或运行时限。`make compose-up` 也会在构建前做同样的预检。
 
 Compose 暴露的开发端口：
 
@@ -100,6 +102,8 @@ curl http://localhost:18080/readyz
 docker compose up -d --scale worker=3
 ```
 
+worker 数量决定 Redis 消费和租约处理并发度；实际沙箱并发度受 `EXECUTOR_MAX_CONCURRENCY` 限制。单个 Compose executor 仍共享一个 Docker daemon，要继续提升容量，应将 executor 部署到独立运行时节点并让 worker 访问其内网地址。
+
 手动执行数据库迁移（默认连接本地 Compose PostgreSQL，也可覆盖 `DATABASE_URL`）：
 
 ```bash
@@ -128,7 +132,9 @@ Mobile:
 | --- | --- |
 | `frontend` | Next.js standalone app and same-origin API proxy |
 | `api` | Problem/submission API and transactional outbox relay |
-| `worker` | Redis consumer, PostgreSQL lease owner and isolated Docker runner |
+| `worker` | Redis consumer, PostgreSQL lease owner and remote executor client |
+| `executor` | Authenticated, concurrency-bounded Docker sandbox execution |
+| `judge-images` | One-shot trusted runtime image preloader |
 | `postgres` | Problems, test case metadata, submissions, artifact metadata and results |
 | `redis` | Redis Streams judge queue |
 | `minio` | Object-backed test case files and submission artifacts |
@@ -276,7 +282,7 @@ curl -i -b /tmp/gojudge.cookies -c /tmp/gojudge.cookies \
 
 ## Sandbox
 
-worker 通过 Docker CLI 启动一次性容器执行用户代码，核心限制包括：
+executor 通过 Docker CLI 启动一次性容器执行用户代码，核心限制包括：
 
 - `--network none`
 - `--memory 64m`
@@ -288,7 +294,9 @@ worker 通过 Docker CLI 启动一次性容器执行用户代码，核心限制�
 - `--tmpfs /tmp:rw,noexec,nosuid,size=64m`
 - stdout 和 stderr 分别最多捕获 1 MiB
 
-Compose 中 worker 挂载 Docker socket 和 `/tmp/codingjudge-sandbox`。这个目录需要和宿主机路径一致，因为 Docker daemon 挂载的是宿主机路径。
+Compose 中只有长期运行的 executor 挂载 Docker Socket 和 `/tmp/codingjudge-sandbox`；worker 只能调用内部执行 API。`judge-images` 是启动前预拉镜像的一次性受信任容器，也会临时挂载 Socket。沙箱目录需要和宿主机路径一致，因为 Docker daemon 挂载的是宿主机路径。executor 使用 `EXECUTOR_TOKEN` 验证 Bearer Token，生产环境应替换默认开发密钥，并通过 TLS 或 mTLS 保护节点间流量。
+
+这一拆分减少了持有高权限 Socket 的长期进程，但不会消除 Docker Socket 本身的宿主机级风险。更高安全等级应使用专用 executor 节点，并评估 rootless runtime、Socket proxy、gVisor 或 Firecracker。
 
 Go 和 C++ 使用独立编译容器，编译上限为 10 秒和 512 MiB；编译成功后，测试用例共享同一产物，并分别在只读运行容器中执行。题目的 CPU、内存和时间限制只约束运行阶段，避免把编译开销误判为超时。
 
@@ -313,7 +321,7 @@ docker compose exec redis redis-cli XPENDING judge:submissions judge-workers
 
 ## Observability
 
-API 和每个 worker 都在独立端口暴露 Prometheus 指标（API: `:8080/metrics`，worker: `:9091/metrics`），所有 custom metric 使用 `codingjudge_` 前缀。Prometheus 静态发现 API 并通过 DNS 自动发现 worker。
+API、每个 worker 和 executor 都在独立端口暴露 Prometheus 指标（API: `:8080/metrics`，worker: `:9091/metrics`，executor: `:8090/metrics`），所有 custom metric 使用 `codingjudge_` 前缀。Prometheus 静态发现 API，并通过 DNS 自动发现 worker 和 executor。executor 指标端点只在 Compose 内网中可达。
 
 启动含监控的 Compose 栈：
 
@@ -321,7 +329,7 @@ API 和每个 worker 都在独立端口暴露 Prometheus 指标（API: `:8080/me
 make observability-up
 ```
 
-Grafana 预配 Dashboard（UID `gojudge-overview`）包含 API、Queue/Outbox、Worker、Judge 四个行，内置 HTTP 吞吐/延迟/错误、幂等命中与限流拒绝、队列深度、worker 并发度、判题用例耗时，以及按 `compile/run` 和结果拆分的 sandbox 执行耗时面板。默认凭据 admin/admin。
+Grafana 预配 Dashboard（UID `gojudge-overview`）包含 API、Queue/Outbox、Worker、Judge、Executor 五个行，内置 HTTP 吞吐/延迟/错误、幂等命中与限流拒绝、队列深度、worker 并发度、判题用例耗时、sandbox 编译/运行耗时，以及 executor 槽位利用率、排队 P95 和执行结果。默认凭据 admin/admin。
 
 验证配置：
 
@@ -377,6 +385,7 @@ npm run test:e2e
 ```text
 cmd/api/              API service entrypoint
 cmd/worker/           isolated judge worker entrypoint
+cmd/executor/         authenticated sandbox executor entrypoint
 cmd/migrate/          versioned PostgreSQL migration runner
 frontend/             Next.js app, Monaco workbench, unit and Playwright tests
 internal/domain/      shared domain models
@@ -386,6 +395,7 @@ internal/queue/       in-memory and reliable Redis Streams queues
 internal/ratelimit/   atomic Redis per-user submission token bucket
 internal/outbox/      transactional outbox relay
 internal/judge/       judge service and Docker runner
+internal/executor/    internal execution protocol, HTTP client and server
 internal/judgeworker/ worker leases, heartbeat, retries and concurrency
 migrations/           PostgreSQL schema and seed data
 docs/openapi.yaml     API contract draft
@@ -402,6 +412,7 @@ docs/screenshots/     desktop and mobile product screenshots
 5. 已完成：20 道精选题库、标准化难度/标签、每题至少 6 个隐藏用例和前端组合筛选。
 6. 已完成：Prometheus 应用指标、Grafana 预配 Dashboard、k6 固定负载基准——所有轮次 HTTP 失败 0、逻辑失败 0、掉迭代 0。
 7. 已完成：`Idempotency-Key` 并发幂等提交、Redis Lua 用户级限流、`429/Retry-After` 协议与低基数 Prometheus 指标。
+8. 已完成：将 Docker Socket 从 worker 移入带认证、并发上限和健康检查的独立 executor 服务。
 
 ## Resume Highlights
 
@@ -413,6 +424,7 @@ docs/screenshots/     desktop and mobile product screenshots
 - 使用 Transactional Outbox 解决 PostgreSQL 与 Redis 双写一致性，并通过租约与 fencing token 拒绝重复执行的迟到结果。
 - 使用 PostgreSQL 部分唯一索引与请求指纹保证提交幂等，通过 Redis Lua 令牌桶在多 API 实例间执行原子用户级限流。
 - 将 Redis Consumer Group 下沉到 judge worker，支持 `docker compose --scale worker=N` 横向扩展。
+- 将高权限 Docker Socket 从 worker 中移除，以内部认证协议连接带并发舱壁的 sandbox executor。
 - 使用 HttpOnly Cookie + 服务端 Session 实现可撤销登录态，提交记录绑定用户并按 AC 去重题目聚合排行榜。
 - 使用 Next.js + Monaco 构建桌面分栏、移动标签式判题工作台，并以 Playwright 覆盖 Go/C++/Python 浏览器端到端流程。
 - 设计 20+2 分层题库，以 PostgreSQL 标准化标签、幂等种子迁移和隐藏用例完整性测试保证可维护性。

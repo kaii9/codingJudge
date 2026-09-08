@@ -16,7 +16,7 @@ Status: implemented.
 - Optional Redis Streams queue through `REDIS_ADDR`.
 - API endpoints for health, problems, submission creation and submission detail.
 - API stores submissions and durable outbox intents; workers consume Redis directly.
-- Worker evaluates submissions through Docker sandbox.
+- Worker evaluates submissions through an authenticated sandbox executor; the executor owns Docker access.
 - Dockerfile, Docker Compose, Makefile, GitHub Actions.
 - README, OpenAPI draft, PostgreSQL migration draft.
 
@@ -25,7 +25,7 @@ Verification:
 ```bash
 make test
 docker compose config
-go build ./cmd/api ./cmd/worker
+go build ./cmd/api ./cmd/worker ./cmd/executor
 ```
 
 ## Phase 1: MVP API Completion
@@ -237,7 +237,7 @@ Acceptance:
 
 ## Current Development Slice
 
-The backend MVP, browser demo, reliable multi-worker phase, curated problem library, observability/load testing, authentication, MinIO assets, and submission admission control are complete. The next recommended slice is separating sandbox execution capacity from the shared local Docker daemon and validating it on independent executor nodes. Cursor pagination plus a unified OpenAPI/error contract follows that capacity work.
+The backend MVP, browser demo, reliable multi-worker phase, curated problem library, observability/load testing, authentication, MinIO assets, submission admission control, and the sandbox executor service boundary are complete. The next capacity slice is deploying executors on independent runtime nodes and measuring them against the published saturation baseline. Cursor pagination plus a unified OpenAPI/error contract follows that distributed-capacity work.
 
 Reason:
 
@@ -245,6 +245,8 @@ Reason:
 - PostgreSQL outbox, leases and fencing tokens protect dual writes and stale workers.
 - Redis consumption runs directly in horizontally scalable judge workers.
 - Repeated saturation testing shows that adding local worker consumers alone is insufficient when all of them launch sandboxes through one Docker daemon.
+- Workers now call a token-authenticated, concurrency-bounded executor and no longer mount the Docker Socket; local Compose still has one executor backed by one Docker daemon.
+- Executor slot capacity, in-flight batches, queue wait and outcomes are exported to Prometheus and provisioned in Grafana.
 - Go, C++ and Python accepted submissions have passed end-to-end.
 - Wrong answer, runtime error, timeout and dead-letter paths have been exercised end-to-end.
 - The Next.js workbench supports problem navigation, Monaco editing, status polling and submission history.
@@ -257,6 +259,7 @@ Reason:
 
 Not yet implemented:
 
+- Multi-node executor discovery/load balancing and an independent-daemon benchmark.
 - Contests and administration.
 - Cursor pagination for growing submission histories.
 - A generated/validated OpenAPI contract and unified error catalog.
