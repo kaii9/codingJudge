@@ -74,13 +74,13 @@ func main() {
 	}
 
 	var runner judge.Runner
-	if cfg.ExecutorURL != "" {
-		runner, err = executor.NewClient(cfg.ExecutorURL, cfg.ExecutorToken, cfg.ExecutorTimeout)
+	if len(cfg.ExecutorURLs) > 0 {
+		runner, err = executor.NewClientPool(cfg.ExecutorURLs, cfg.ExecutorToken, cfg.ExecutorTimeout)
 		if err != nil {
 			slog.Error("remote executor setup failed", "error", err)
 			os.Exit(1)
 		}
-		slog.Info("remote executor enabled", "url", cfg.ExecutorURL, "timeout", cfg.ExecutorTimeout)
+		slog.Info("remote executor pool enabled", "endpoints", len(cfg.ExecutorURLs), "timeout", cfg.ExecutorTimeout)
 	} else {
 		runner = judge.NewDockerRunnerWithWorkDir(cfg.JudgeImage, cfg.JudgeWorkdir, judge.WithSandboxMetrics(metricsApp))
 		slog.Warn("using local Docker runner; configure EXECUTOR_URL for process isolation")

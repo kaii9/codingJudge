@@ -41,9 +41,12 @@ flowchart LR
     WorkerB --> Store
     WorkerA --> MinIO[(MinIO<br/>test-case assets + artifacts)]
     WorkerB --> MinIO
-    WorkerA --> Executor[Sandbox executor<br/>Bearer auth + bounded concurrency]
-    WorkerB --> Executor
-    Executor --> Docker[Docker sandbox<br/>network none, memory/cpu/pids limits]
+    WorkerA --> Pool[Client-side executor pool<br/>round-robin]
+    WorkerB --> Pool
+    Pool --> ExecutorA[Sandbox executor A<br/>Bearer auth + bounded concurrency]
+    Pool --> ExecutorB[Sandbox executor B<br/>Bearer auth + bounded concurrency]
+    ExecutorA --> DockerA[Docker daemon A<br/>isolated storage + work volume]
+    ExecutorB --> DockerB[Docker daemon B<br/>isolated storage + work volume]
 ```
 
 前端只通过 API 创建和查询提交；API 先通过 Redis Lua 令牌桶执行用户级提交限流，再在一个 PostgreSQL 事务中保存 submission 和 outbox 事件。`Idempotency-Key` 与请求指纹受数据库唯一索引保护，并发重试只会产生一个 submission 和一条 outbox 事件。relay 负责可靠发布到 Redis，但不消费任务。多个 worker 直接通过同一 Consumer Group 抢任务，通过带 Bearer Token 的内部 HTTP 协议请求有并发上限的 executor；worker 不再挂载 Docker Socket。数据库字段实现应用层租约和 fencing token 防护，决定最终写权限，避免重复消息或旧 worker 的迟到结果覆盖新结果。MinIO 承载 object-backed 测试用例文件和提交源码/stdout/stderr artifact，PostgreSQL 保存 object key、size 和 SHA256 metadata。
@@ -102,7 +105,26 @@ curl http://localhost:18080/readyz
 docker compose up -d --scale worker=3
 ```
 
-worker 数量决定 Redis 消费和租约处理并发度；实际沙箱并发度受 `EXECUTOR_MAX_CONCURRENCY` 限制。单个 Compose executor 仍共享一个 Docker daemon，要继续提升容量，应将 executor 部署到独立运行时节点并让 worker 访问其内网地址。
+worker 数量决定 Redis 消费和租约处理并发度；实际沙箱并发度受每个节点的 `EXECUTOR_MAX_CONCURRENCY` 限制。默认 Compose 使用一个 executor；可选双节点 overlay 会让 worker 在两个 executor 间轮询分发。
+
+## Multi-node Executor Deployment
+
+仓库提供可复现的本地双执行节点部署：两个 executor 分别连接独立的 Docker-in-Docker daemon、镜像存储和工作卷，worker 通过 `EXECUTOR_URLS` 做线程安全的 client-side round-robin。启动并验收：
+
+```bash
+make compose-multinode-up
+make verify-multinode
+```
+
+验收脚本会确认两个 daemon ID 不同、worker 未挂载 Docker Socket、Go/C++/Python 真实提交均 AC、请求确实分布到两个 executor、Redis Pending/Lag 归零，并且 Prometheus 同时发现两个健康 executor。停止该拓扑：
+
+```bash
+make compose-multinode-down
+```
+
+首次启动需要把三个判题镜像分别导入两个 daemon，建议为 Docker Desktop 预留至少 6–8 GiB 可用空间。`judge-images` 和 `judge-images-b` 只在启动阶段临时读取宿主机 Docker Socket，把已下载的受信任镜像复制到各自 daemon；若宿主机没有对应镜像，loader 会直接拉取到该 daemon。
+
+这个 overlay 用于本地架构演示、故障验证和容量实验：DinD 节点需要 `privileged`，2375 明文端口仅存在于未向宿主机暴露的 Compose 内网中。生产部署应把 executor 放到独立 VM/节点，使用 TLS/mTLS、服务发现和更强隔离运行时（如 gVisor、Firecracker 或 rootless runtime），不能把本地 DinD 拓扑直接视为生产安全方案。
 
 手动执行数据库迁移（默认连接本地 Compose PostgreSQL，也可覆盖 `DATABASE_URL`）：
 
@@ -135,6 +157,9 @@ Mobile:
 | `worker` | Redis consumer, PostgreSQL lease owner and remote executor client |
 | `executor` | Authenticated, concurrency-bounded Docker sandbox execution |
 | `judge-images` | One-shot trusted runtime image preloader |
+| `executor-b` | Optional second executor in the multi-node overlay |
+| `docker-daemon-a/b` | Independent DinD runtimes used only by the multi-node overlay |
+| `judge-images-b` | One-shot runtime image loader for the second daemon |
 | `postgres` | Problems, test case metadata, submissions, artifact metadata and results |
 | `redis` | Redis Streams judge queue |
 | `minio` | Object-backed test case files and submission artifacts |
@@ -294,9 +319,9 @@ executor 通过 Docker CLI 启动一次性容器执行用户代码，核心限�
 - `--tmpfs /tmp:rw,noexec,nosuid,size=64m`
 - stdout 和 stderr 分别最多捕获 1 MiB
 
-Compose 中只有长期运行的 executor 挂载 Docker Socket 和 `/tmp/codingjudge-sandbox`；worker 只能调用内部执行 API。`judge-images` 是启动前预拉镜像的一次性受信任容器，也会临时挂载 Socket。沙箱目录需要和宿主机路径一致，因为 Docker daemon 挂载的是宿主机路径。executor 使用 `EXECUTOR_TOKEN` 验证 Bearer Token，生产环境应替换默认开发密钥，并通过 TLS 或 mTLS 保护节点间流量。
+默认 Compose 中只有长期运行的 executor 挂载 Docker Socket 和 `/tmp/codingjudge-sandbox`；worker 只能调用内部执行 API。双节点 overlay 中两个 executor 都不挂载宿主机 Socket，而是通过 Compose 内网连接各自 DinD daemon，并与对应 daemon 共享 `/workspace/codingjudge-sandbox` 命名卷。`judge-images` loader 是启动阶段的一次性受信任容器，会临时读取宿主机 Socket 以复制运行时镜像。executor 使用 `EXECUTOR_TOKEN` 验证 Bearer Token，生产环境应替换默认开发密钥，并通过 TLS 或 mTLS 保护节点间流量。
 
-这一拆分减少了持有高权限 Socket 的长期进程，但不会消除 Docker Socket 本身的宿主机级风险。更高安全等级应使用专用 executor 节点，并评估 rootless runtime、Socket proxy、gVisor 或 Firecracker。
+这一拆分减少了持有高权限 Socket 的长期进程，但默认模式不会消除 Docker Socket 本身的宿主机级风险；双节点模式中的 `privileged` DinD 同样属于高权限基础设施。更高安全等级应使用专用 executor 节点，并评估 rootless runtime、Socket proxy、gVisor 或 Firecracker。
 
 Go 和 C++ 使用独立编译容器，编译上限为 10 秒和 512 MiB；编译成功后，测试用例共享同一产物，并分别在只读运行容器中执行。题目的 CPU、内存和时间限制只约束运行阶段，避免把编译开销误判为超时。
 
@@ -321,7 +346,7 @@ docker compose exec redis redis-cli XPENDING judge:submissions judge-workers
 
 ## Observability
 
-API、每个 worker 和 executor 都在独立端口暴露 Prometheus 指标（API: `:8080/metrics`，worker: `:9091/metrics`，executor: `:8090/metrics`），所有 custom metric 使用 `codingjudge_` 前缀。Prometheus 静态发现 API，并通过 DNS 自动发现 worker 和 executor。executor 指标端点只在 Compose 内网中可达。
+API、每个 worker 和 executor 都在独立端口暴露 Prometheus 指标（API: `:8080/metrics`，worker: `:9091/metrics`，executor: `:8090/metrics`），所有 custom metric 使用 `codingjudge_` 前缀。Prometheus 静态发现 API，并通过 DNS 自动发现 worker；默认配置发现一个 executor，双节点配置发现 `executor` 和 `executor-b`。executor 指标端点只在 Compose 内网中可达。
 
 启动含监控的 Compose 栈：
 
@@ -397,6 +422,7 @@ internal/outbox/      transactional outbox relay
 internal/judge/       judge service and Docker runner
 internal/executor/    internal execution protocol, HTTP client and server
 internal/judgeworker/ worker leases, heartbeat, retries and concurrency
+deploy/compose/       optional deployment overlays, including dual executor nodes
 migrations/           PostgreSQL schema and seed data
 docs/openapi.yaml     API contract draft
 docs/plan.md          MVP plan
@@ -413,6 +439,7 @@ docs/screenshots/     desktop and mobile product screenshots
 6. 已完成：Prometheus 应用指标、Grafana 预配 Dashboard、k6 固定负载基准——所有轮次 HTTP 失败 0、逻辑失败 0、掉迭代 0。
 7. 已完成：`Idempotency-Key` 并发幂等提交、Redis Lua 用户级限流、`429/Retry-After` 协议与低基数 Prometheus 指标。
 8. 已完成：将 Docker Socket 从 worker 移入带认证、并发上限和健康检查的独立 executor 服务。
+9. 已完成：实现多 executor URL 校验与并发安全轮询，并提供两个独立 Docker daemon 的 Compose overlay 和自动化部署验收。
 
 ## Resume Highlights
 
@@ -425,6 +452,7 @@ docs/screenshots/     desktop and mobile product screenshots
 - 使用 PostgreSQL 部分唯一索引与请求指纹保证提交幂等，通过 Redis Lua 令牌桶在多 API 实例间执行原子用户级限流。
 - 将 Redis Consumer Group 下沉到 judge worker，支持 `docker compose --scale worker=N` 横向扩展。
 - 将高权限 Docker Socket 从 worker 中移除，以内部认证协议连接带并发舱壁的 sandbox executor。
+- 通过并发安全的 client-side round-robin 扩展 executor pool，以双独立 Docker daemon 拓扑验证请求分流、全语言 AC、队列排空和 Prometheus 多目标发现。
 - 使用 HttpOnly Cookie + 服务端 Session 实现可撤销登录态，提交记录绑定用户并按 AC 去重题目聚合排行榜。
 - 使用 Next.js + Monaco 构建桌面分栏、移动标签式判题工作台，并以 Playwright 覆盖 Go/C++/Python 浏览器端到端流程。
 - 设计 20+2 分层题库，以 PostgreSQL 标准化标签、幂等种子迁移和隐藏用例完整性测试保证可维护性。

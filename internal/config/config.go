@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -100,7 +101,7 @@ type WorkerConfig struct {
 	MinIOSecretKey    string
 	MinIOBucket       string
 	MinIOUseSSL       bool
-	ExecutorURL       string
+	ExecutorURLs      []string
 	ExecutorToken     string
 	ExecutorTimeout   time.Duration
 }
@@ -146,7 +147,6 @@ func LoadWorker(getenv func(string) string) (WorkerConfig, error) {
 		MinIOAccessKey:    getenv("MINIO_ACCESS_KEY"),
 		MinIOSecretKey:    getenv("MINIO_SECRET_KEY"),
 		MinIOBucket:       getenv("MINIO_BUCKET"),
-		ExecutorURL:       getenv("EXECUTOR_URL"),
 		ExecutorToken:     getenv("EXECUTOR_TOKEN"),
 		ExecutorTimeout:   2 * time.Minute,
 	}
@@ -205,14 +205,31 @@ func LoadWorker(getenv func(string) string) (WorkerConfig, error) {
 	if err := validateMinIOValues(cfg.MinIOEndpoint, cfg.MinIOAccessKey, cfg.MinIOSecretKey); err != nil {
 		return WorkerConfig{}, err
 	}
-	if (cfg.ExecutorURL == "") != (cfg.ExecutorToken == "") {
-		return WorkerConfig{}, fmt.Errorf("EXECUTOR_URL and EXECUTOR_TOKEN must be configured together")
+	executorURLs := getenv("EXECUTOR_URLS")
+	if executorURLs == "" {
+		executorURLs = getenv("EXECUTOR_URL")
 	}
-	if cfg.ExecutorURL != "" {
-		parsed, err := url.Parse(cfg.ExecutorURL)
-		if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
-			return WorkerConfig{}, fmt.Errorf("EXECUTOR_URL must be an absolute http or https URL")
+	if executorURLs != "" {
+		seen := make(map[string]struct{})
+		for _, rawURL := range strings.Split(executorURLs, ",") {
+			executorURL := strings.TrimSpace(rawURL)
+			if executorURL == "" {
+				return WorkerConfig{}, fmt.Errorf("EXECUTOR_URLS must not contain empty entries")
+			}
+			parsed, err := url.Parse(executorURL)
+			if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
+				return WorkerConfig{}, fmt.Errorf("executor URL %q must be an absolute http or https URL", executorURL)
+			}
+			normalized := strings.TrimRight(executorURL, "/")
+			if _, duplicate := seen[normalized]; duplicate {
+				return WorkerConfig{}, fmt.Errorf("duplicate executor URL %q", normalized)
+			}
+			seen[normalized] = struct{}{}
+			cfg.ExecutorURLs = append(cfg.ExecutorURLs, normalized)
 		}
+	}
+	if (len(cfg.ExecutorURLs) == 0) != (cfg.ExecutorToken == "") {
+		return WorkerConfig{}, fmt.Errorf("EXECUTOR_URL or EXECUTOR_URLS and EXECUTOR_TOKEN must be configured together")
 	}
 	return cfg, nil
 }

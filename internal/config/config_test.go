@@ -222,8 +222,51 @@ func TestLoadWorkerReadsRemoteExecutorConfig(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.ExecutorURL != "http://executor:8090" || cfg.ExecutorToken != "internal-secret" || cfg.ExecutorTimeout != 90*time.Second {
+	if len(cfg.ExecutorURLs) != 1 || cfg.ExecutorURLs[0] != "http://executor:8090" || cfg.ExecutorToken != "internal-secret" || cfg.ExecutorTimeout != 90*time.Second {
 		t.Fatalf("executor config = %+v", cfg)
+	}
+}
+
+func TestLoadWorkerReadsMultipleExecutorURLs(t *testing.T) {
+	t.Parallel()
+	values := map[string]string{
+		"DATABASE_URL":   "postgres://db",
+		"REDIS_ADDR":     "redis:6379",
+		"EXECUTOR_URLS":  "http://executor-a:8090/, http://executor-b:8090",
+		"EXECUTOR_URL":   "not-used-when-executor-urls-is-set",
+		"EXECUTOR_TOKEN": "internal-secret",
+	}
+	cfg, err := config.LoadWorker(func(key string) string { return values[key] })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.ExecutorURLs) != 2 || cfg.ExecutorURLs[0] != "http://executor-a:8090" || cfg.ExecutorURLs[1] != "http://executor-b:8090" {
+		t.Fatalf("executor URLs = %v", cfg.ExecutorURLs)
+	}
+}
+
+func TestLoadWorkerRejectsInvalidExecutorURLLists(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		urls string
+	}{
+		{name: "empty entry", urls: "http://executor-a:8090,"},
+		{name: "malformed URL", urls: "executor-a:8090"},
+		{name: "duplicate after normalization", urls: "http://executor-a:8090,http://executor-a:8090/"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			values := map[string]string{
+				"DATABASE_URL":   "postgres://db",
+				"REDIS_ADDR":     "redis:6379",
+				"EXECUTOR_URLS":  tt.urls,
+				"EXECUTOR_TOKEN": "internal-secret",
+			}
+			if _, err := config.LoadWorker(func(key string) string { return values[key] }); err == nil {
+				t.Fatalf("LoadWorker should reject EXECUTOR_URLS %q", tt.urls)
+			}
+		})
 	}
 }
 

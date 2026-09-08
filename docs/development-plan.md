@@ -235,9 +235,30 @@ Acceptance:
 - Exceeding the configured burst returns `429 rate_limited` with `Retry-After`.
 - Redis failure fails submission creation closed with `503 rate_limit_unavailable`.
 
+## Phase 11: Multi-node Executor Deployment
+
+Status: implemented as a reproducible local deployment topology. Production-grade infrastructure and an independent-machine saturation benchmark remain future work.
+
+Goal: remove the single shared Docker daemon from the local capacity path and verify that workers can distribute sandbox batches across independent runtimes.
+
+Tasks:
+
+- Accept and validate an `EXECUTOR_URLS` list while retaining `EXECUTOR_URL` compatibility.
+- Select executor clients with a concurrency-safe round-robin policy.
+- Add a Compose overlay with two executor services, independent DinD daemons, image stores and sandbox work volumes.
+- Configure Prometheus to discover both executor targets.
+- Automate topology, isolation, request distribution, queue drain and real Go/C++/Python submission checks.
+
+Acceptance:
+
+- The two executors report different Docker daemon IDs.
+- Workers have no Docker Socket mount and distribute sequential batches across both executors.
+- Go, C++ and Python submissions finish as accepted, with Redis Pending and Lag returning to zero.
+- Prometheus reports two healthy executor targets.
+
 ## Current Development Slice
 
-The backend MVP, browser demo, reliable multi-worker phase, curated problem library, observability/load testing, authentication, MinIO assets, submission admission control, and the sandbox executor service boundary are complete. The next capacity slice is deploying executors on independent runtime nodes and measuring them against the published saturation baseline. Cursor pagination plus a unified OpenAPI/error contract follows that distributed-capacity work.
+The backend MVP, browser demo, reliable multi-worker phase, curated problem library, observability/load testing, authentication, MinIO assets, submission admission control, sandbox executor boundary, and reproducible dual-runtime deployment are complete. The next capacity task is a controlled saturation comparison of one versus two independent daemons. Production service discovery/TLS and cursor pagination plus a unified OpenAPI/error contract follow that measurement.
 
 Reason:
 
@@ -245,7 +266,8 @@ Reason:
 - PostgreSQL outbox, leases and fencing tokens protect dual writes and stale workers.
 - Redis consumption runs directly in horizontally scalable judge workers.
 - Repeated saturation testing shows that adding local worker consumers alone is insufficient when all of them launch sandboxes through one Docker daemon.
-- Workers now call a token-authenticated, concurrency-bounded executor and no longer mount the Docker Socket; local Compose still has one executor backed by one Docker daemon.
+- Workers now call a token-authenticated, concurrency-bounded executor pool and no longer mount the Docker Socket; the optional overlay has two executors backed by distinct Docker daemon IDs and work volumes.
+- `EXECUTOR_URLS` is validated at startup and client selection uses an atomic round-robin counter; infrastructure retries may select the next endpoint without hidden same-request replay inside the client.
 - Executor slot capacity, in-flight batches, queue wait and outcomes are exported to Prometheus and provisioned in Grafana.
 - Go, C++ and Python accepted submissions have passed end-to-end.
 - Wrong answer, runtime error, timeout and dead-letter paths have been exercised end-to-end.
@@ -259,7 +281,7 @@ Reason:
 
 Not yet implemented:
 
-- Multi-node executor discovery/load balancing and an independent-daemon benchmark.
+- Production executor service discovery, TLS/mTLS and a published controlled independent-daemon saturation benchmark.
 - Contests and administration.
 - Cursor pagination for growing submission histories.
 - A generated/validated OpenAPI contract and unified error catalog.

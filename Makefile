@@ -1,8 +1,9 @@
 GOCACHE_DIR := $(CURDIR)/.cache/go-build
+MULTINODE_COMPOSE := docker compose -f docker-compose.yml -f deploy/compose/multinode.yml
 
 JUDGE_IMAGES := golang:1.25-alpine python:3.12-alpine gcc:13
 
-.PHONY: test frontend-deps frontend-test frontend-build test-all build run-api run-worker upload-cases judge-images compose-up compose-down compose-config migrate migrate-reliable-workers migrate-hot20 fault-test smoke-minio-assets
+.PHONY: test frontend-deps frontend-test frontend-build test-all build run-api run-worker upload-cases judge-images compose-up compose-down compose-config compose-multinode-up compose-multinode-down verify-multinode migrate migrate-reliable-workers migrate-hot20 fault-test smoke-minio-assets
 
 test:
 	mkdir -p $(GOCACHE_DIR)
@@ -53,6 +54,16 @@ compose-down:
 compose-config:
 	docker compose config --quiet
 	@! docker compose config | grep -E 'WORKER_URL|WORKER_ADDR'
+	$(MULTINODE_COMPOSE) config --quiet
+
+compose-multinode-up: judge-images
+	$(MULTINODE_COMPOSE) up -d --build --scale worker=2 --wait
+
+compose-multinode-down:
+	$(MULTINODE_COMPOSE) down
+
+verify-multinode:
+	bash scripts/verify-multinode-executors.sh
 
 migrate:
 	DATABASE_URL="$${DATABASE_URL:-postgres://codingjudge:codingjudge@localhost:15432/codingjudge?sslmode=disable}" go run ./cmd/migrate -dir migrations
@@ -72,6 +83,7 @@ smoke-minio-assets:
 observability-config:
 	docker compose config --quiet
 	@docker run --rm --entrypoint /bin/promtool -v $(CURDIR)/deploy/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro -v $(CURDIR)/deploy/prometheus/prometheus.rules.yml:/etc/prometheus/prometheus.rules.yml:ro prom/prometheus:v3.13.0 check config /etc/prometheus/prometheus.yml
+	@docker run --rm --entrypoint /bin/promtool -v $(CURDIR)/deploy/prometheus/prometheus.multinode.yml:/etc/prometheus/prometheus.yml:ro -v $(CURDIR)/deploy/prometheus/prometheus.rules.yml:/etc/prometheus/prometheus.rules.yml:ro prom/prometheus:v3.13.0 check config /etc/prometheus/prometheus.yml
 	@docker run --rm --entrypoint /bin/promtool -v $(CURDIR)/deploy/prometheus/prometheus.rules.yml:/etc/prometheus/prometheus.rules.yml:ro prom/prometheus:v3.13.0 check rules /etc/prometheus/prometheus.rules.yml
 	@docker compose --profile loadtest config --quiet
 
