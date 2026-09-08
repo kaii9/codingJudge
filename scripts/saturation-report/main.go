@@ -290,8 +290,10 @@ func render(metadata map[string]string, rows []benchmarkRow) string {
 	fmt.Fprintln(&out)
 	fmt.Fprint(&out, "Every run processed the same batch and reached terminal `accepted` with zero HTTP and logical failures. Peak Stream lag above zero demonstrates that the workers were presented with queued work rather than an underloaded steady state. Comparisons use median throughput. ")
 	switch {
-	case ratio >= 1.1:
+	case ratio >= 1.1 && efficiency >= 70:
 		fmt.Fprintf(&out, "The %d-worker configuration delivered %.2fx the one-worker throughput (%.1f%% scaling efficiency).\n", last.Workers, ratio, efficiency)
+	case ratio >= 1.1:
+		fmt.Fprintf(&out, "The %d-worker configuration delivered only %.2fx the one-worker throughput (%.1f%% scaling efficiency). The gain is real but far below proportional scaling, indicating a shared bottleneck.\n", last.Workers, ratio, efficiency)
 	case ratio >= 0.9:
 		fmt.Fprintf(&out, "The %d-worker result was effectively flat at %.2fx the one-worker throughput (%.1f%% scaling efficiency), so these runs do not demonstrate useful horizontal scaling.\n", last.Workers, ratio, efficiency)
 	default:

@@ -43,6 +43,21 @@ func TestRenderDoesNotMisrepresentRegressionAsScaling(t *testing.T) {
 	}
 }
 
+func TestRenderCallsOutLowEfficiencyGain(t *testing.T) {
+	metadata := map[string]string{"repetitions": "1"}
+	rows := []benchmarkRow{
+		{Trial: 1, Workers: 1, Batch: 60, Accepted: 60, MakespanSeconds: 20, Throughput: 3, PeakLag: 58},
+		{Trial: 1, Workers: 2, Batch: 60, Accepted: 60, MakespanSeconds: 18, Throughput: 3.3, PeakLag: 58},
+		{Trial: 1, Workers: 4, Batch: 60, Accepted: 60, MakespanSeconds: 17, Throughput: 3.5, PeakLag: 56},
+	}
+	got := render(metadata, rows)
+	for _, want := range []string{"only 1.17x", "far below proportional scaling", "shared bottleneck"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("report missing %q:\n%s", want, got)
+		}
+	}
+}
+
 func TestValidateRowsRejectsNonSaturatingRun(t *testing.T) {
 	rows := []benchmarkRow{
 		{Trial: 1, Workers: 1, Batch: 60, Accepted: 60, MakespanSeconds: 60, Throughput: 1, PeakLag: 59, PeakOutstanding: 60},
