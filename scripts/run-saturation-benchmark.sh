@@ -143,6 +143,7 @@ fi
   echo "language: python"
   echo "problem_id: echo"
   echo "worker_concurrency: 1"
+  echo "repetitions: 1"
 } > "$META"
 
 echo "workers,batch,accepted,makespan_seconds,throughput_per_second,http_p95_ms,peak_pending,peak_lag,peak_outstanding" > "$CSV"

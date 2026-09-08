@@ -339,7 +339,7 @@ make load-worker-scale       # 1/2/4 worker comparison, generates report
 make load-saturation         # burst + backlog drain, measures 1/2/4 worker throughput
 ```
 
-实测基准报告位于 `docs/benchmarks/`。固定负载报告验证稳定性；饱和报告通过突发提交主动制造 Redis Stream 积压，再比较 1/2/4 worker 的 drain makespan 与吞吐量。运行对应命令可重新生成。
+实测基准报告位于 `docs/benchmarks/`。固定负载报告验证稳定性；[饱和与积压排空报告](docs/benchmarks/2026-09-08-saturation-scaling.md)通过突发提交主动制造 Redis Stream 积压，再比较 1/2/4 worker 的 drain makespan 与吞吐量。运行对应命令可重新生成。
 
 ## Verification
 

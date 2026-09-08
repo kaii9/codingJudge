@@ -146,6 +146,10 @@ func validateRows(rows []benchmarkRow) error {
 
 func render(metadata map[string]string, rows []benchmarkRow) string {
 	var out strings.Builder
+	repetitions := metadata["repetitions"]
+	if repetitions == "" {
+		repetitions = "1"
+	}
 	fmt.Fprintln(&out, "# Worker Saturation and Backlog-Drain Benchmark")
 	fmt.Fprintln(&out)
 	fmt.Fprintf(&out, "- **Date:** %s\n", metadata["date"])
@@ -154,6 +158,7 @@ func render(metadata map[string]string, rows []benchmarkRow) string {
 	fmt.Fprintf(&out, "- **Docker:** %s\n", metadata["docker_version"])
 	fmt.Fprintf(&out, "- **Workload:** %s `%s` %s submissions, %s VUs, shared-iterations burst; worker concurrency %s\n",
 		metadata["batch_size"], metadata["problem_id"], metadata["language"], metadata["vus"], metadata["worker_concurrency"])
+	fmt.Fprintf(&out, "- **Samples:** %s run per worker count\n", repetitions)
 	fmt.Fprintln(&out)
 	fmt.Fprintln(&out, "The burst intentionally creates Redis Stream lag before the workers drain it. Makespan is measured from the earliest submission creation to the latest terminal update for that isolated run ID.")
 	fmt.Fprintln(&out)
@@ -173,8 +178,24 @@ func render(metadata map[string]string, rows []benchmarkRow) string {
 	efficiency := ratio / float64(last.Workers) * 100
 	fmt.Fprintln(&out, "## Interpretation")
 	fmt.Fprintln(&out)
-	fmt.Fprintf(&out, "All rounds processed the same batch and reached terminal `accepted` with zero HTTP and logical failures. Peak Stream lag above zero demonstrates that the workers were presented with queued work rather than an underloaded steady state. The %d-worker run delivered %.2fx the one-worker throughput (%.1f%% scaling efficiency).\n", last.Workers, ratio, efficiency)
+	fmt.Fprint(&out, "All rounds processed the same batch and reached terminal `accepted` with zero HTTP and logical failures. Peak Stream lag above zero demonstrates that the workers were presented with queued work rather than an underloaded steady state. ")
+	switch {
+	case ratio >= 1.1:
+		fmt.Fprintf(&out, "The %d-worker run delivered %.2fx the one-worker throughput (%.1f%% scaling efficiency).\n", last.Workers, ratio, efficiency)
+	case ratio >= 0.9:
+		fmt.Fprintf(&out, "The %d-worker result was effectively flat at %.2fx the one-worker throughput (%.1f%% scaling efficiency), so this run does not demonstrate useful horizontal scaling.\n", last.Workers, ratio, efficiency)
+	default:
+		fmt.Fprintf(&out, "The %d-worker run regressed to %.2fx the one-worker throughput (%.1f%% scaling efficiency), so this run does not demonstrate horizontal scaling. This is consistent with contention in a shared execution resource, such as concurrent sandbox launches through one Docker daemon, but this benchmark alone does not prove the cause.\n", last.Workers, ratio, efficiency)
+	}
 	fmt.Fprintln(&out)
-	fmt.Fprintln(&out, "This measures backlog-drain capacity on the recorded machine, not a universal production QPS limit. Docker Desktop, host scheduling, image caching, PostgreSQL, Redis, and the selected Python workload all affect the result.")
+	fmt.Fprintln(&out, "This measures backlog-drain capacity on the recorded machine, not a universal production QPS limit. Docker Desktop, host scheduling, image caching, PostgreSQL, Redis, and the selected Python workload all affect the result. Each worker count was sampled once; repeat trials are required before using these numbers for capacity planning.")
+	fmt.Fprintln(&out)
+	fmt.Fprintln(&out, "## Reproduce")
+	fmt.Fprintln(&out)
+	fmt.Fprintln(&out, "```bash")
+	fmt.Fprintln(&out, "make load-saturation")
+	fmt.Fprintln(&out, "```")
+	fmt.Fprintln(&out)
+	fmt.Fprintln(&out, "The runner refuses to publish a report unless every round has the exact requested submission count, zero HTTP and logical failures, all submissions accepted, observed positive Stream lag, and a fully drained queue.")
 	return out.String()
 }
