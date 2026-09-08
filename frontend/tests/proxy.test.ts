@@ -58,6 +58,7 @@ describe("API proxy", () => {
       headers: {
         "Authorization": "Bearer secret",
         "Content-Type": "application/json",
+        "Idempotency-Key": "attempt-123",
         "X-Internal-Header": "do-not-forward",
       },
       body,
@@ -73,11 +74,42 @@ describe("API proxy", () => {
     expect(init?.method).toBe("POST");
     expect(init?.signal).toBe(request.signal);
     expect(Array.from(new Headers(init?.headers).entries()))
-      .toEqual([["content-type", "application/json"]]);
+      .toEqual([
+        ["content-type", "application/json"],
+        ["idempotency-key", "attempt-123"],
+      ]);
     expect(await new Response(init?.body).text()).toBe(body);
     expect(response.status).toBe(202);
     expect(response.headers.get("content-type")).toBe("application/json");
     await expect(response.json()).resolves.toEqual({ id: "sub-1" });
+  });
+
+  it("preserves idempotency replay and rate limit response headers", async () => {
+    vi.stubEnv("API_INTERNAL_URL", "http://api:8080");
+    vi.stubGlobal("fetch", vi.fn<typeof fetch>().mockResolvedValue(Response.json(
+      { error: { code: "rate_limited", message: "submission rate limit exceeded" } },
+      {
+        status: 429,
+        headers: {
+          "Idempotency-Replayed": "true",
+          "RateLimit-Limit": "10",
+          "RateLimit-Remaining": "0",
+          "Retry-After": "6",
+        },
+      },
+    )));
+
+    const response = await POST(new Request("http://localhost/api/submissions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: "{}",
+    }), { params: Promise.resolve({ path: ["submissions"] }) });
+
+    expect(response.status).toBe(429);
+    expect(response.headers.get("idempotency-replayed")).toBe("true");
+    expect(response.headers.get("ratelimit-limit")).toBe("10");
+    expect(response.headers.get("ratelimit-remaining")).toBe("0");
+    expect(response.headers.get("retry-after")).toBe("6");
   });
 
   it("forwards browser cookies and preserves upstream Set-Cookie", async () => {

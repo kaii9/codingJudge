@@ -102,9 +102,11 @@ export async function proxy(request: Request, context: ProxyContext): Promise<Re
   const { path } = await context.params;
   const contentType = request.headers.get("content-type");
   const cookie = request.headers.get("cookie");
+  const idempotencyKey = request.headers.get("idempotency-key");
   const headers = new Headers();
   if (contentType) headers.set("content-type", contentType);
   if (cookie) headers.set("cookie", cookie);
+  if (idempotencyKey) headers.set("idempotency-key", idempotencyKey);
 
   const method = request.method.toUpperCase();
   let body: ArrayBuffer | undefined;
@@ -138,6 +140,10 @@ export async function proxy(request: Request, context: ProxyContext): Promise<Re
   if (responseContentType) responseHeaders.set("content-type", responseContentType);
   const setCookie = response.headers.get("set-cookie");
   if (setCookie) responseHeaders.set("set-cookie", setCookie);
+  for (const name of ["idempotency-replayed", "ratelimit-limit", "ratelimit-remaining", "retry-after"]) {
+    const value = response.headers.get(name);
+    if (value) responseHeaders.set(name, value);
+  }
 
   return new Response(response.body, {
     status: response.status,

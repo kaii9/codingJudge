@@ -47,15 +47,22 @@ async function openCodePane(page: Page) {
   await expect(page.getByRole("tabpanel", { name: "Code" })).toBeVisible();
 }
 
+async function registerTestUser(page: Page, suffix: string) {
+  const username = `e2e_${suffix}_${Date.now().toString(36)}`.slice(0, 32);
+  await page.getByPlaceholder("username").fill(username);
+  await page.getByPlaceholder("password").fill("correct-password");
+  await page.getByRole("button", { name: "Register" }).click();
+  await expect(page.getByRole("button", { name: "Log out" })).toBeVisible();
+}
+
 test.describe.configure({ mode: "serial" });
 test.setTimeout(60_000);
 
 for (const language of acceptedPrograms) {
   test(`submits ${language.label} and reaches Accepted`, async ({ page }) => {
     await page.goto("/");
-    const sumLink = page.getByRole("link", { name: /A\+B/ }).first();
-    await expect(sumLink).toBeVisible();
-    await sumLink.click();
+    await registerTestUser(page, language.value);
+    await page.goto("/problems/sum");
     await expect(page.getByRole("heading", { name: /A\+B/ })).toBeVisible();
     await openCodePane(page);
     await page.getByLabel("Language").selectOption(language.value);

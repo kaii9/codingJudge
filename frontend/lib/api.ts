@@ -49,7 +49,10 @@ export const getSubmission = (id: string, signal?: AbortSignal) =>
 export const createSubmission = (input: CreateSubmissionInput) =>
   request<Submission>("/api/submissions", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      "Idempotency-Key": globalThis.crypto.randomUUID(),
+    },
     body: JSON.stringify(input),
   });
 export const getCurrentUser = () => request<User>("/api/auth/me");

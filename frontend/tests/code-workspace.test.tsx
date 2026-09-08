@@ -26,6 +26,7 @@ const dynamicHarness = vi.hoisted(() => ({
     options: DynamicOptions;
   }>,
   monacoProps: [] as MonacoProps[],
+  loaderConfig: vi.fn(),
   showLoading: false,
 }));
 
@@ -53,7 +54,10 @@ vi.mock("next/dynamic", () => ({
   },
 }));
 
-vi.mock("@monaco-editor/react", () => ({ default: () => null }));
+vi.mock("@monaco-editor/react", () => ({
+  default: () => null,
+  loader: { config: dynamicHarness.loaderConfig },
+}));
 
 beforeAll(() => {
   const environment = globalThis as typeof globalThis & { jsdom: { window: Window } };
@@ -78,6 +82,7 @@ function latestMonacoProps() {
 it("loads Monaco client-only and renders an accessible stable-size fallback", () => {
   expect(dynamicHarness.calls).toHaveLength(1);
   expect(dynamicHarness.calls[0]?.options.ssr).toBe(false);
+  expect(dynamicHarness.loaderConfig).toHaveBeenCalledWith({ paths: { vs: "/monaco/vs" } });
 
   dynamicHarness.showLoading = true;
   render(<CodeWorkspace problemId="sum" submitting={false} onSubmit={vi.fn()} />);

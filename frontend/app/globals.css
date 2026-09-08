@@ -778,13 +778,13 @@ a {
 
 @media (max-width: 480px) {
   .app-shell__topbar {
-    height: 56px;
-    flex-basis: 56px;
+    height: 132px;
+    flex-basis: 132px;
   }
 
   .app-shell__topbar-inner {
     grid-template-columns: minmax(0, 1fr) auto;
-    grid-template-rows: 24px 32px;
+    grid-template-rows: 28px 40px 64px;
     display: grid;
     gap: 0 8px;
     padding: 0 10px;
@@ -802,7 +802,7 @@ a {
     height: 32px;
     grid-column: 1 / -1;
     grid-row: 2;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: repeat(3, minmax(0, 1fr));
     display: grid;
   }
 
@@ -820,10 +820,37 @@ a {
     margin-left: 0;
   }
 
+  .auth-panel {
+    width: 100%;
+    grid-column: 1 / -1;
+    grid-row: 3;
+    align-self: center;
+  }
+
+  .auth-panel__form {
+    width: 100%;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    display: grid;
+    gap: 4px 6px;
+  }
+
+  .auth-panel input {
+    width: 100%;
+  }
+
+  .auth-panel button {
+    justify-content: center;
+  }
+
+  .auth-panel__user {
+    width: 100%;
+    justify-content: flex-end;
+  }
+
   .workbench {
-    min-height: calc(100vh - 56px);
-    min-height: calc(100dvh - 56px);
-    height: calc(100vh - 56px);
-    height: calc(100dvh - 56px);
+    min-height: calc(100vh - 132px);
+    min-height: calc(100dvh - 132px);
+    height: calc(100vh - 132px);
+    height: calc(100dvh - 132px);
   }
 }

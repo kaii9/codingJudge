@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ApiError, getLeaderboard, getProblems } from "@/lib/api";
+import { ApiError, createSubmission, getLeaderboard, getProblems } from "@/lib/api";
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -51,5 +51,18 @@ describe("getLeaderboard", () => {
       { rank: 1, username: "kai", solved: 3, acceptedSubmissions: 4 },
     ]);
     expect(fetch).toHaveBeenCalledWith("/api/leaderboard", undefined);
+  });
+});
+
+describe("createSubmission", () => {
+  it("adds a unique idempotency key", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(Response.json({ id: "sub-1" }, { status: 202 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await createSubmission({ problemId: "sum", language: "go", code: "package main" });
+
+    const [, init] = fetchMock.mock.calls[0];
+    const key = new Headers(init?.headers).get("idempotency-key");
+    expect(key).toMatch(/^[0-9a-f-]{36}$/);
   });
 });

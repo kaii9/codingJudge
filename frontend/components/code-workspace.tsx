@@ -3,9 +3,11 @@
 import dynamic from "next/dynamic";
 import { Play } from "lucide-react";
 import { useCallback, useRef, useState, type CSSProperties } from "react";
-import type { EditorProps } from "@monaco-editor/react";
+import { loader, type EditorProps } from "@monaco-editor/react";
 import { useLocalDraft } from "@/hooks/use-local-draft";
 import type { CreateSubmissionInput, Language } from "@/lib/types";
+
+loader.config({ paths: { vs: "/monaco/vs" } });
 
 type WorkspaceSubmission = Pick<CreateSubmissionInput, "language" | "code">;
 

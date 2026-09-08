@@ -1,6 +1,7 @@
 node_modules
 .next
 coverage
+public/monaco
 *.log
 npm-debug.log*
 
