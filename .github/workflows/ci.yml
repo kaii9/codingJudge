@@ -121,7 +121,7 @@ jobs:
           docker pull golang:1.25-alpine
           docker pull python:3.12-alpine
           docker pull gcc:13
-          mkdir -p /tmp/codingjudge-sandbox
+          install -d -m 1777 /tmp/codingjudge-sandbox
           docker compose up -d --build --wait
       - name: run browser judge flows
         run: npm --prefix frontend run test:e2e
