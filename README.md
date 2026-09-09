@@ -24,6 +24,19 @@ Docs: OpenAPI
 Observability: slog + Prometheus + Grafana
 ```
 
+## Resume and Interview Guide
+
+求职材料按“先使用、再理解、后深挖”组织，建议不要一次性通读所有长文：
+
+| 顺序 | 材料 | 用途 |
+| ---: | --- | --- |
+| 1 | [简历项目说明](docs/codingjudge-resume-project.md) | 直接选用三至五条简历描述，准备 1/3/5 分钟项目介绍 |
+| 2 | [面试问答手册](docs/codingjudge-interview-handbook.md) | 按可靠性、并发正确性、沙箱和故障场景准备追问 |
+| 3 | [完整源码教程](docs/codingjudge-complete-tutorial.md) | 把回答对应到真实请求链路、源码入口与测试证据 |
+| 4 | [PostgreSQL vs MySQL](docs/postgresql-vs-mysql-for-mysql-users.md) | 已熟悉 MySQL 时，准备项目为何选 PostgreSQL 以及如何迁移的追问 |
+
+简历只陈述已有源码、测试或基准报告可自证的能力。本地固定负载和拓扑实验不等于生产 QPS，Docker 沙箱也不等于强多租户安全边界。
+
 单元测试和只读写 API 演示可以使用内存 store；跨进程判题要求同时设置 `DATABASE_URL` 和 `REDIS_ADDR`。只配置其中一项会启动失败，避免产生不完整的持久化链路。
 
 ## Architecture
