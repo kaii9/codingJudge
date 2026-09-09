@@ -17,7 +17,10 @@ import (
 	"github.com/kaii9/codingJudge/internal/domain"
 )
 
-const maxCapturedOutputBytes = 1 << 20
+const (
+	maxCapturedOutputBytes = 1 << 20
+	compileTimeout         = 30 * time.Second
+)
 
 type limitedBuffer struct {
 	buffer    bytes.Buffer
@@ -135,7 +138,7 @@ func (r *DockerRunner) RunBatch(ctx context.Context, req RunRequest, inputs []st
 		if r.image != "" {
 			compileArgs = replaceImage(compileArgs, r.image)
 		}
-		compileCtx, cancelCompile := context.WithTimeout(ctx, 10*time.Second)
+		compileCtx, cancelCompile := context.WithTimeout(ctx, compileTimeout)
 		started := time.Now()
 		compileResult, err := executeDocker(compileCtx, compileArgs)
 		cancelCompile()
