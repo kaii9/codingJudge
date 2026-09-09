@@ -237,7 +237,7 @@ Acceptance:
 
 ## Phase 11: Multi-node Executor Deployment
 
-Status: implemented as a reproducible local deployment topology. Production-grade infrastructure and an independent-machine saturation benchmark remain future work.
+Status: implemented and measured as a reproducible local deployment topology. Production-grade infrastructure and an independent-machine saturation benchmark remain future work. The controlled local benchmark completed three balanced-order trials with 540/540 accepted submissions: median throughput was 4.267/s for one executor/daemon, 6.390/s for two executors sharing one daemon (1.50x baseline), and 5.979/s for two executors with independent daemons (0.94x shared, 1.40x baseline).
 
 Goal: remove the single shared Docker daemon from the local capacity path and verify that workers can distribute sandbox batches across independent runtimes.
 
@@ -248,6 +248,7 @@ Tasks:
 - Add a Compose overlay with two executor services, independent DinD daemons, image stores and sandbox work volumes.
 - Configure Prometheus to discover both executor targets.
 - Automate topology, isolation, request distribution, queue drain and real Go/C++/Python submission checks.
+- Compare single, shared-daemon and independent-daemon topologies with equal declared capacity for the two-executor cases, strict validity gates and a generated evidence report.
 
 Acceptance:
 
@@ -255,10 +256,11 @@ Acceptance:
 - Workers have no Docker Socket mount and distribute sequential batches across both executors.
 - Go, C++ and Python submissions finish as accepted, with Redis Pending and Lag returning to zero.
 - Prometheus reports two healthy executor targets.
+- The topology benchmark records complete balanced trials, all-accepted outcomes, positive queue pressure and slot use, exact executor batch totals, and restores the development stack and temporary benchmark settings on exit.
 
 ## Current Development Slice
 
-The backend MVP, browser demo, reliable multi-worker phase, curated problem library, observability/load testing, authentication, MinIO assets, submission admission control, sandbox executor boundary, and reproducible dual-runtime deployment are complete. The next capacity task is a controlled saturation comparison of one versus two independent daemons. Production service discovery/TLS and cursor pagination plus a unified OpenAPI/error contract follow that measurement.
+The backend MVP, browser demo, reliable multi-worker phase, curated problem library, observability/load testing, authentication, MinIO assets, submission admission control, sandbox executor boundary, reproducible dual-runtime deployment, and controlled local topology benchmark are complete. The next executor reliability task is health-aware endpoint removal and recovery. Production service discovery/TLS, an independent-machine saturation benchmark, and cursor pagination plus a unified OpenAPI/error contract remain future work.
 
 Reason:
 
@@ -269,6 +271,7 @@ Reason:
 - Workers now call a token-authenticated, concurrency-bounded executor pool and no longer mount the Docker Socket; the optional overlay has two executors backed by distinct Docker daemon IDs and work volumes.
 - `EXECUTOR_URLS` is validated at startup and client selection uses an atomic round-robin counter; infrastructure retries may select the next endpoint without hidden same-request replay inside the client.
 - Executor slot capacity, in-flight batches, queue wait and outcomes are exported to Prometheus and provisioned in Grafana.
+- The controlled topology benchmark accepted all 540 measured submissions. Adding a second local executor slot raised median throughput 1.50x, while splitting the same two slots across two DinD daemons on one Docker Desktop VM reached only 0.94x of the shared-daemon topology; the report therefore does not claim linear or production scaling.
 - Go, C++ and Python accepted submissions have passed end-to-end.
 - Wrong answer, runtime error, timeout and dead-letter paths have been exercised end-to-end.
 - The Next.js workbench supports problem navigation, Monaco editing, status polling and submission history.
@@ -281,7 +284,7 @@ Reason:
 
 Not yet implemented:
 
-- Production executor service discovery, TLS/mTLS and a published controlled independent-daemon saturation benchmark.
+- Health-aware executor removal/recovery, production service discovery, TLS/mTLS and an independent-machine saturation benchmark.
 - Contests and administration.
 - Cursor pagination for growing submission histories.
 - A generated/validated OpenAPI contract and unified error catalog.

@@ -370,9 +370,12 @@ make load-smoke              # 1 VU, 30s smoke test
 make load-baseline           # 20 VU, 2m mixed workload
 make load-worker-scale       # 1/2/4 worker comparison, generates report
 make load-saturation         # 3 repeated burst/drain trials per 1/2/4 worker count
+make load-executor-topologies # single/shared/independent executor topology comparison
 ```
 
-实测基准报告位于 `docs/benchmarks/`。固定负载报告验证稳定性；[饱和与积压排空报告](docs/benchmarks/2026-09-08-saturation-scaling.md)通过突发提交主动制造 Redis Stream 积压，再比较 1/2/4 worker 的 drain makespan 与吞吐量。运行对应命令可重新生成。
+实测基准报告位于 `docs/benchmarks/`。固定负载报告验证稳定性；[饱和与积压排空报告](docs/benchmarks/2026-09-08-saturation-scaling.md)通过突发提交主动制造 Redis Stream 积压，再比较 1/2/4 worker 的 drain makespan 与吞吐量。
+
+[Executor 拓扑受控实验](docs/benchmarks/2026-09-09-executor-topology.md)固定为 4 个 worker、每个 executor 1 个槽位和相同 Python workload，使用三轮平衡顺序比较 1 executor/1 daemon、2 executor/1 shared daemon、2 executor/2 independent daemon。540/540 个测量任务全部 AC；中位吞吐从 4.267/s 提升到 shared 拓扑的 6.390/s（1.50x），而 independent 拓扑为 5.979/s，仅为 shared 的 0.94x。这说明增加 executor 槽位缓解了本机瓶颈，但在同一 Docker Desktop VM 上拆分 daemon 没有产生额外吞吐收益；结果不能外推为生产 QPS 或独立机器扩容结论。运行对应命令可重新生成报告，runner 会验证 daemon ID、任务分流、队列排空和 accepted 数量，任一门禁失败都不会覆盖正式报告。
 
 ## Verification
 
@@ -440,6 +443,7 @@ docs/screenshots/     desktop and mobile product screenshots
 7. 已完成：`Idempotency-Key` 并发幂等提交、Redis Lua 用户级限流、`429/Retry-After` 协议与低基数 Prometheus 指标。
 8. 已完成：将 Docker Socket 从 worker 移入带认证、并发上限和健康检查的独立 executor 服务。
 9. 已完成：实现多 executor URL 校验与并发安全轮询，并提供两个独立 Docker daemon 的 Compose overlay 和自动化部署验收。
+10. 已完成：发布三种 executor/daemon 拓扑的受控饱和实验；三轮 540/540 AC，并证明同宿主机拆分 daemon 不等同于增加有效容量。
 
 ## Resume Highlights
 
@@ -453,6 +457,7 @@ docs/screenshots/     desktop and mobile product screenshots
 - 将 Redis Consumer Group 下沉到 judge worker，支持 `docker compose --scale worker=N` 横向扩展。
 - 将高权限 Docker Socket 从 worker 中移除，以内部认证协议连接带并发舱壁的 sandbox executor。
 - 通过并发安全的 client-side round-robin 扩展 executor pool，以双独立 Docker daemon 拓扑验证请求分流、全语言 AC、队列排空和 Prometheus 多目标发现。
+- 设计可拒绝无效结果的 executor 拓扑基准，以三轮平衡顺序完成 540/540 AC；测得双 executor 共享 daemon 相对单 executor 提升 1.50x，而同宿主双 daemon 仅为共享拓扑的 0.94x，据此避免无依据的线性扩容结论。
 - 使用 HttpOnly Cookie + 服务端 Session 实现可撤销登录态，提交记录绑定用户并按 AC 去重题目聚合排行榜。
 - 使用 Next.js + Monaco 构建桌面分栏、移动标签式判题工作台，并以 Playwright 覆盖 Go/C++/Python 浏览器端到端流程。
 - 设计 20+2 分层题库，以 PostgreSQL 标准化标签、幂等种子迁移和隐藏用例完整性测试保证可维护性。
