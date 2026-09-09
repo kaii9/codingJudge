@@ -1,0 +1,58 @@
+services:
+  docker-daemon-a:
+    image: docker:27.5.1-dind
+    privileged: true
+    command: ["--host=unix:///var/run/docker.sock", "--host=tcp://0.0.0.0:2375", "--tls=false"]
+    environment:
+      DOCKER_TLS_CERTDIR: ""
+    volumes:
+      - executor-a-docker:/var/lib/docker
+      - executor-a-work:/workspace/codingjudge-sandbox
+    healthcheck:
+      test: ["CMD-SHELL", "docker info >/dev/null 2>&1"]
+      interval: 3s
+      timeout: 3s
+      retries: 40
+      start_period: 5s
+
+  judge-images:
+    environment:
+      DOCKER_HOST: tcp://docker-daemon-a:2375
+    command:
+      - sh
+      - -ec
+      - |
+        for image in golang:1.25-alpine python:3.12-alpine gcc:13; do
+          if ! docker image inspect "$$image" >/dev/null 2>&1; then
+            if DOCKER_HOST=unix:///var/run/host-docker.sock docker image inspect "$$image" >/dev/null 2>&1; then
+              DOCKER_HOST=unix:///var/run/host-docker.sock docker image save "$$image" |
+                DOCKER_HOST=tcp://docker-daemon-a:2375 docker image load
+            else
+              docker pull "$$image"
+            fi
+          fi
+        done
+    depends_on: !override
+      docker-daemon-a:
+        condition: service_healthy
+    volumes: !override
+      - /var/run/docker.sock:/var/run/host-docker.sock
+
+  executor:
+    environment:
+      DOCKER_HOST: tcp://docker-daemon-a:2375
+      EXECUTOR_MAX_CONCURRENCY: "1"
+      JUDGE_WORKDIR: /workspace/codingjudge-sandbox
+    depends_on: !override
+      judge-images:
+        condition: service_completed_successfully
+    volumes: !override
+      - executor-a-work:/workspace/codingjudge-sandbox
+
+  worker:
+    environment:
+      EXECUTOR_URLS: http://executor:8090
+
+volumes:
+  executor-a-docker:
+  executor-a-work:

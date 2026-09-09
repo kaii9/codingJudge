@@ -78,12 +78,16 @@ fault-test:
 smoke-minio-assets:
 	bash scripts/smoke-minio-assets.sh
 
-.PHONY: observability-config observability-up load-smoke load-baseline load-worker-scale load-saturation
+.PHONY: observability-config observability-up load-smoke load-baseline load-worker-scale load-saturation load-executor-topologies
 
 observability-config:
 	docker compose config --quiet
+	docker compose -f docker-compose.yml -f deploy/compose/executor-node.yml -f deploy/compose/executor-benchmark.yml config --quiet
+	docker compose -f docker-compose.yml -f deploy/compose/executor-node.yml -f deploy/compose/executor-shared-daemon.yml -f deploy/compose/executor-benchmark.yml config --quiet
+	docker compose -f docker-compose.yml -f deploy/compose/multinode.yml -f deploy/compose/executor-benchmark.yml config --quiet
 	@docker run --rm --entrypoint /bin/promtool -v $(CURDIR)/deploy/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro -v $(CURDIR)/deploy/prometheus/prometheus.rules.yml:/etc/prometheus/prometheus.rules.yml:ro prom/prometheus:v3.13.0 check config /etc/prometheus/prometheus.yml
 	@docker run --rm --entrypoint /bin/promtool -v $(CURDIR)/deploy/prometheus/prometheus.multinode.yml:/etc/prometheus/prometheus.yml:ro -v $(CURDIR)/deploy/prometheus/prometheus.rules.yml:/etc/prometheus/prometheus.rules.yml:ro prom/prometheus:v3.13.0 check config /etc/prometheus/prometheus.yml
+	@docker run --rm --entrypoint /bin/promtool -v $(CURDIR)/deploy/prometheus/prometheus.benchmark.yml:/etc/prometheus/prometheus.yml:ro -v $(CURDIR)/deploy/prometheus/prometheus.rules.yml:/etc/prometheus/prometheus.rules.yml:ro prom/prometheus:v3.13.0 check config /etc/prometheus/prometheus.yml
 	@docker run --rm --entrypoint /bin/promtool -v $(CURDIR)/deploy/prometheus/prometheus.rules.yml:/etc/prometheus/prometheus.rules.yml:ro prom/prometheus:v3.13.0 check rules /etc/prometheus/prometheus.rules.yml
 	@docker compose --profile loadtest config --quiet
 
@@ -105,3 +109,6 @@ load-worker-scale:
 
 load-saturation:
 	bash scripts/run-saturation-benchmark.sh
+
+load-executor-topologies: judge-images
+	bash scripts/run-executor-topology-benchmark.sh

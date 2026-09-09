@@ -8,3 +8,6 @@ worktrees/
 bin/
 coverage.out
 frontend/
+docs/
+loadtest/
+scripts/

@@ -12,7 +12,10 @@ frontend/coverage/
 loadtest/results/*.json
 loadtest/results/*.csv
 loadtest/results/*.log
+loadtest/results/*.prom
 loadtest/results/meta.txt
 loadtest/results/saturation-meta.txt
+loadtest/results/executor-topology-meta.txt
+loadtest/results/executor-topology-*-topology.txt
 !loadtest/results/.gitkeep
 docs/benchmarks/*.tmp

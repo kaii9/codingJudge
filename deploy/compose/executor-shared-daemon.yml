@@ -1,0 +1,42 @@
+services:
+  executor-b:
+    build: .
+    command: ["/app/executor"]
+    environment:
+      DOCKER_HOST: tcp://docker-daemon-a:2375
+      EXECUTOR_ADDR: ":8090"
+      EXECUTOR_TOKEN: "${EXECUTOR_TOKEN:-codingjudge-dev-executor-token}"
+      EXECUTOR_MAX_CONCURRENCY: "1"
+      EXECUTOR_SHUTDOWN_GRACE: "30s"
+      JUDGE_WORKDIR: /workspace/codingjudge-sandbox
+    depends_on:
+      judge-images:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8090/readyz"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    volumes:
+      - executor-a-work:/workspace/codingjudge-sandbox
+    tmpfs:
+      - /tmp
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    stop_grace_period: 35s
+
+  worker:
+    environment:
+      EXECUTOR_URLS: http://executor:8090,http://executor-b:8090
+    depends_on:
+      executor-b:
+        condition: service_healthy
+
+  prometheus:
+    volumes: !override
+      - ./deploy/prometheus/prometheus.multinode.yml:/etc/prometheus/prometheus.yml:ro
+      - ./deploy/prometheus/prometheus.rules.yml:/etc/prometheus/prometheus.rules.yml:ro
+      - prometheus-data:/prometheus
