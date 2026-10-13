@@ -77,6 +77,12 @@ func (s *grpcExecutor) RunBatch(ctx context.Context, req *pb.RunBatchRequest) (*
 	}
 	runs, err := s.core.runner.RunBatch(workCtx, request.judgeRequest(), request.Inputs)
 	if err != nil {
+		// A drain deadline cancels the server's work context, not the caller.
+		// Keep caller cancellation permanent, but let a live worker retry a
+		// server shutdown through its fenced, bounded attempt policy.
+		if errors.Is(err, context.Canceled) && ctx.Err() == nil && s.core.admission.workCtx.Err() != nil {
+			return nil, rpcError(errDraining)
+		}
 		return nil, rpcError(err)
 	}
 	resultMetric = "success"

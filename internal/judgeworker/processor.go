@@ -123,26 +123,28 @@ func (p *Processor) ProcessOne(ctx context.Context) error {
 }
 
 func (p *Processor) ProcessJob(ctx context.Context, job domain.Job) error {
-	ctx, cancelTask := context.WithTimeout(ctx, p.config.TaskTimeout)
-	defer cancelTask()
 	ctx, span := telemetry.Start(telemetry.Extract(ctx, job.TraceParent), "judge.process")
 	defer span.End()
+	// Execution and recovery have separate bounded budgets. Keep the parent
+	// cancellation attached so shutdown never starts detached database writes.
+	taskCtx, cancelTask := context.WithTimeout(ctx, p.config.TaskTimeout)
+	defer cancelTask()
 	started := p.config.Now()
 	token, err := p.config.Token()
 	if err != nil {
 		return fmt.Errorf("generate judge token: %w", err)
 	}
-	claim, err := p.store.ClaimSubmission(ctx, job.SubmissionID, p.config.WorkerID, token, job.Receipt, p.config.Now(), p.config.LeaseDuration)
+	claim, err := p.store.ClaimSubmission(taskCtx, job.SubmissionID, p.config.WorkerID, token, job.Receipt, p.config.Now(), p.config.LeaseDuration)
 	if err != nil {
 		return fmt.Errorf("claim submission: %w", err)
 	}
 	switch claim.State {
 	case domain.ClaimTerminal, domain.ClaimActiveOtherReceipt:
-		return p.queue.Ack(ctx, job)
+		return p.queue.Ack(taskCtx, job)
 	case domain.ClaimActiveSameReceipt:
 		return nil
 	case domain.ClaimMissing:
-		if err := p.queue.DeadLetter(ctx, job, job.Attempts, fmt.Errorf("submission %q not found", job.SubmissionID)); err != nil {
+		if err := p.queue.DeadLetter(taskCtx, job, job.Attempts, fmt.Errorf("submission %q not found", job.SubmissionID)); err != nil {
 			return err
 		}
 		if p.metrics != nil {
@@ -151,13 +153,14 @@ func (p *Processor) ProcessJob(ctx context.Context, job domain.Job) error {
 		return nil
 	case domain.ClaimAcquired:
 		ctx = telemetry.WithExecutionID(ctx, fmt.Sprintf("%s:attempt-%d", job.SubmissionID, claim.Attempts))
+		taskCtx = telemetry.WithExecutionID(taskCtx, telemetry.ExecutionID(ctx))
 		if p.metrics != nil {
 			p.metrics.WorkerJobStarted()
 			if claim.LeaseTakeover {
 				p.metrics.WorkerLeaseTakeover()
 			}
 		}
-		judgeResult, err := p.processClaim(ctx, job, claim)
+		judgeResult, err := p.processClaim(taskCtx, ctx, job, claim)
 		if p.metrics != nil {
 			language := string(claim.Submission.Language)
 			result := metricResult(judgeResult, err)
@@ -169,7 +172,12 @@ func (p *Processor) ProcessJob(ctx context.Context, job domain.Job) error {
 	}
 }
 
-func (p *Processor) processClaim(ctx context.Context, job domain.Job, claim domain.SubmissionClaim) (domain.JudgeResult, error) {
+func (p *Processor) processClaim(ctx, recoveryParent context.Context, job domain.Job, claim domain.SubmissionClaim) (domain.JudgeResult, error) {
+	// A crashed worker can lose its lease before writing retry/dead-letter state.
+	// Do not execute untrusted code again once the acquired counter is exhausted.
+	if claim.Attempts > p.config.MaxAttempts {
+		return domain.JudgeResult{}, p.recoverClaim(recoveryParent, job, claim, errors.New("judge attempt budget exhausted"))
+	}
 	workCtx, cancel := context.WithCancel(ctx)
 	done := make(chan struct{})
 	heartbeatResult := make(chan error, 1)
@@ -184,10 +192,27 @@ func (p *Processor) processClaim(ctx context.Context, job domain.Job, claim doma
 	close(done)
 	cancel()
 	heartbeatErr := <-heartbeatResult
-	if heartbeatErr != nil && result.Status == "" && !errors.Is(err, errRetry) && !errors.Is(err, errDeadLetter) {
-		return domain.JudgeResult{}, heartbeatErr
+	if heartbeatErr != nil && result.Status == "" {
+		err = heartbeatErr
+	}
+	if err != nil && result.Status == "" {
+		return domain.JudgeResult{}, p.recoverClaim(recoveryParent, job, claim, err)
 	}
 	return result, err
+}
+
+func (p *Processor) recoverClaim(parent context.Context, job domain.Job, claim domain.SubmissionClaim, cause error) error {
+	if errors.Is(cause, ErrLeaseLost) {
+		return cause
+	}
+	if err := parent.Err(); err != nil {
+		return errors.Join(cause, err)
+	}
+	// Recovery still requires the current fencing token and an unexpired lease;
+	// this budget cannot revive ownership or make an expired claim valid.
+	ctx, cancel := context.WithTimeout(parent, 5*time.Second)
+	defer cancel()
+	return p.handleInfrastructureError(ctx, job, claim, cause)
 }
 
 func (p *Processor) processClaimWork(ctx context.Context, job domain.Job, claim domain.SubmissionClaim) (domain.JudgeResult, error) {
@@ -202,7 +227,7 @@ func (p *Processor) processClaimWork(ctx context.Context, job domain.Job, claim 
 		problem, ok, err = p.store.GetProblem(ctx, claim.Submission.ProblemID)
 	}
 	if err != nil {
-		return domain.JudgeResult{}, p.handleInfrastructureError(ctx, job, claim, fmt.Errorf("get problem: %w", err))
+		return domain.JudgeResult{}, fmt.Errorf("get problem: %w", err)
 	}
 	if !ok {
 		result := domain.JudgeResult{Status: domain.StatusInternalError, Stderr: "problem not found"}
@@ -218,10 +243,7 @@ func (p *Processor) processClaimWork(ctx context.Context, job domain.Job, claim 
 
 	result, err := p.evaluate(ctx, claim, problem)
 	if err != nil {
-		if errors.Is(err, ErrLeaseLost) {
-			return domain.JudgeResult{}, err
-		}
-		return domain.JudgeResult{}, p.handleInfrastructureError(ctx, job, claim, err)
+		return domain.JudgeResult{}, err
 	}
 	if err := p.saveArtifacts(ctx, claim, result); err != nil {
 		return domain.JudgeResult{}, err

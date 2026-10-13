@@ -18,7 +18,7 @@ x-executor: &executor
     EXECUTOR_TOKEN: ${EXECUTOR_TOKEN:-gojudge-local-executor-token}
     EXECUTOR_MAX_CONCURRENCY: "1"
     EXECUTOR_MAX_WAITERS: "4"
-    EXECUTOR_SHUTDOWN_GRACE: 30s
+    EXECUTOR_SHUTDOWN_GRACE: ${CJ_MICRO_EXECUTOR_SHUTDOWN_GRACE:-30s}
     JUDGE_WORKDIR: /tmp/gojudge-microservices-sandbox
   volumes:
     - /var/run/docker.sock:/var/run/docker.sock

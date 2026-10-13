@@ -29,7 +29,7 @@ jobs:
         run: go test -tags integration ./internal/store -run TestMicroservice -count=1
       - name: verify real executions and independent executor rollout
         run: make verify-microservices
-      - name: verify in-flight executor crash recovery
+      - name: verify in-flight executor crash and forced-drain recovery
         run: bash scripts/verify-microservices-faults.sh
       - name: print service logs
         if: failure()

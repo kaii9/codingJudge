@@ -71,6 +71,11 @@ func (a *admission) acquire(ctx context.Context) (context.Context, func(), error
 		<-a.waiters
 	}
 	a.mu.Lock()
+	if err := ctx.Err(); err != nil {
+		a.mu.Unlock()
+		<-a.slots
+		return nil, nil, err
+	}
 	if a.draining {
 		a.mu.Unlock()
 		<-a.slots

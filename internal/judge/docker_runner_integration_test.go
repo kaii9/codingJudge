@@ -8,6 +8,7 @@ import (
 	"github.com/kaii9/codingJudge/internal/domain"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -17,12 +18,30 @@ func TestFastProgramBudgetExcludesDockerLifecycle(t *testing.T) {
 	if os.Getenv("TEST_DOCKER_RUNNER") == "" {
 		t.Skip("TEST_DOCKER_RUNNER is not set")
 	}
+	// Inject a known pre-container delay instead of assuming that Python must
+	// start in 300ms on every loaded Docker Desktop/CI machine. This still uses
+	// the real daemon, container and interpreter; production limits are unchanged.
+	dockerPath, err := exec.LookPath("docker")
+	if err != nil {
+		t.Fatal(err)
+	}
+	proxyDir := t.TempDir()
+	quotedDocker := "'" + strings.ReplaceAll(dockerPath, "'", "'\\''") + "'"
+	proxy := "#!/bin/sh\nif [ \"$1\" = run ]; then sleep 2; fi\nexec " + quotedDocker + " \"$@\"\n"
+	if err := os.WriteFile(filepath.Join(proxyDir, "docker"), []byte(proxy), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", proxyDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	runner := NewDockerRunnerWithWorkDir("", "")
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
-	result, err := runner.Run(ctx, RunRequest{Language: domain.LanguagePython, Code: "print(3)", TimeLimitMS: 300, MemoryLimitMB: 64})
+	started := time.Now()
+	result, err := runner.Run(ctx, RunRequest{Language: domain.LanguagePython, Code: "print(3)", TimeLimitMS: 1000, MemoryLimitMB: 64})
 	if err != nil || result.TimedOut || result.ExitCode != 0 || strings.TrimSpace(result.Stdout) != "3" {
 		t.Fatalf("fast program rejected: %+v err=%v", result, err)
+	}
+	if time.Since(started) < 2*time.Second {
+		t.Fatal("the injected lifecycle delay did not run")
 	}
 }
 
