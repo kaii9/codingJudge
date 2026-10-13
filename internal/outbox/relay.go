@@ -58,7 +58,7 @@ func (r *Relay) PublishBatch(ctx context.Context, now time.Time) error {
 	var batchErr error
 	for _, event := range events {
 		started := time.Now()
-		job := domain.Job{SubmissionID: event.SubmissionID, OutboxID: event.ID}
+		job := domain.Job{SubmissionID: event.SubmissionID, OutboxID: event.ID, Payload: event.Payload}
 		if err := r.publisher.Enqueue(ctx, job); err != nil {
 			nextAttempt := now.Add(publishBackoff(event.PublishAttempts))
 			if _, markErr := r.store.MarkOutboxFailed(ctx, event.ID, event.ClaimToken, nextAttempt, err.Error()); markErr != nil {

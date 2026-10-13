@@ -160,7 +160,16 @@ func (p *Processor) ProcessJob(ctx context.Context, job domain.Job) error {
 }
 
 func (p *Processor) processClaim(ctx context.Context, job domain.Job, claim domain.SubmissionClaim) (domain.JudgeResult, error) {
-	problem, ok, err := p.store.GetProblem(ctx, claim.Submission.ProblemID)
+	var problem domain.Problem
+	var ok bool
+	var err error
+	if snapshots, supported := p.store.(interface {
+		GetSubmissionProblem(context.Context, string) (domain.Problem, bool, error)
+	}); supported {
+		problem, ok, err = snapshots.GetSubmissionProblem(ctx, claim.Submission.ID)
+	} else {
+		problem, ok, err = p.store.GetProblem(ctx, claim.Submission.ProblemID)
+	}
 	if err != nil {
 		return domain.JudgeResult{}, p.handleInfrastructureError(ctx, job, claim, fmt.Errorf("get problem: %w", err))
 	}

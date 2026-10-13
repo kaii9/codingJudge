@@ -13,9 +13,11 @@ import (
 
 	"github.com/kaii9/codingJudge/internal/config"
 	"github.com/kaii9/codingJudge/internal/httpapi"
+	"github.com/kaii9/codingJudge/internal/judgerpc"
 	"github.com/kaii9/codingJudge/internal/metrics"
 	"github.com/kaii9/codingJudge/internal/objectstore"
 	"github.com/kaii9/codingJudge/internal/outbox"
+	"github.com/kaii9/codingJudge/internal/platform"
 	"github.com/kaii9/codingJudge/internal/problems"
 	"github.com/kaii9/codingJudge/internal/queue"
 	"github.com/kaii9/codingJudge/internal/ratelimit"
@@ -41,6 +43,17 @@ func main() {
 		os.Exit(1)
 	}
 	defer cleanupStore()
+	var apiStore httpapi.ProblemStore = st
+	var remoteJudge *judgerpc.Client
+	if endpoint := os.Getenv("JUDGE_SERVICE_ADDR"); endpoint != "" {
+		remoteJudge, err = judgerpc.NewClient(endpoint, os.Getenv("JUDGE_SERVICE_TOKEN"), 5*time.Second)
+		if err != nil {
+			slog.Error("judge client setup failed", "error", err)
+			os.Exit(1)
+		}
+		defer remoteJudge.Close()
+		apiStore = platform.NewStore(st, remoteJudge)
+	}
 
 	// 创建独立的 Prometheus 注册器，注册 Go/Process 基础采集器和应用指标。
 	registry := prometheus.NewRegistry()
@@ -54,6 +67,9 @@ func main() {
 		httpapi.WithMetricsHandler(promhttp.HandlerFor(registry, promhttp.HandlerOpts{})),
 		httpapi.WithReadinessCheck("store", st.Ping),
 		httpapi.WithSecureCookies(cfg.CookieSecure),
+	}
+	if remoteJudge != nil {
+		options = append(options, httpapi.WithObjectGetter(remoteJudge))
 	}
 
 	if cfg.QueueMode == config.QueueRedisStreams {
@@ -69,27 +85,43 @@ func main() {
 			os.Exit(1)
 		}
 		options = append(options, httpapi.WithSubmissionLimiter(submissionLimiter))
-		relayID := processID("api")
-		publisher := queue.NewRedisStreamsQueue(client, queue.DefaultJudgeStream, queue.DefaultJudgeGroup, relayID, queue.WithMetrics(metricsApp))
-		relay := outbox.New(st, publisher, outbox.Config{RelayID: relayID, Metrics: metricsApp})
-		go func() {
-			if err := relay.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
-				slog.Error("outbox relay stopped", "error", err)
+		if remoteJudge != nil {
+			projectorStore, ok := st.(platform.ProjectionStore)
+			if !ok {
+				slog.Error("platform projection store unavailable")
+				os.Exit(1)
 			}
-		}()
-		// 启动 Redis Pending 采样器，定期更新队列待处理数量。
-		go metrics.SamplePending(ctx, metrics.RedisPendingFetcher{Client: client}, queue.DefaultJudgeStream, queue.DefaultJudgeGroup, metricsApp.SetQueuePending, 5*time.Second)
-		options = append(options, httpapi.WithReadinessCheck("redis", func(ctx context.Context) error {
-			return client.Ping(ctx).Err()
-		}))
-		slog.Info("outbox relay enabled", "relay_id", relayID,
-			"submission_rate_per_minute", cfg.SubmissionRateLimitPerMinute,
-			"submission_burst", cfg.SubmissionRateLimitBurst)
+			events := queue.NewRedisStreamsQueue(client, platform.CompletionStream, platform.CompletionGroup, processID("platform-projector"))
+			go func() {
+				if err := platform.RunProjector(ctx, projectorStore, events); err != nil && ctx.Err() == nil {
+					slog.Error("projector stopped", "error", err)
+				}
+			}()
+		}
+		if remoteJudge == nil {
+			relayID := processID("api")
+			publisher := queue.NewRedisStreamsQueue(client, queue.DefaultJudgeStream, queue.DefaultJudgeGroup, relayID, queue.WithMetrics(metricsApp))
+			relay := outbox.New(st, publisher, outbox.Config{RelayID: relayID, Metrics: metricsApp})
+			go func() {
+				if err := relay.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
+					slog.Error("outbox relay stopped", "error", err)
+				}
+			}()
+			// 启动 Redis Pending 采样器，定期更新队列待处理数量。
+			go metrics.SamplePending(ctx, metrics.RedisPendingFetcher{Client: client}, queue.DefaultJudgeStream, queue.DefaultJudgeGroup, metricsApp.SetQueuePending, 5*time.Second)
+			options = append(options, httpapi.WithReadinessCheck("redis", func(ctx context.Context) error {
+				return client.Ping(ctx).Err()
+			}))
+			slog.Info("outbox relay enabled", "relay_id", relayID,
+				"submission_rate_per_minute", cfg.SubmissionRateLimitPerMinute,
+				"submission_burst", cfg.SubmissionRateLimitBurst)
+		}
+		options = append(options, httpapi.WithReadinessCheck("redis", func(ctx context.Context) error { return client.Ping(ctx).Err() }))
 	} else {
 		slog.Warn("memory mode has no cross-process judge relay")
 	}
 
-	if cfg.MinIOEndpoint != "" && cfg.MinIOAccessKey != "" && cfg.MinIOSecretKey != "" {
+	if remoteJudge == nil && cfg.MinIOEndpoint != "" && cfg.MinIOAccessKey != "" && cfg.MinIOSecretKey != "" {
 		objects, err := objectstore.NewMinIO(objectstore.MinIOConfig{
 			Endpoint:  cfg.MinIOEndpoint,
 			AccessKey: cfg.MinIOAccessKey,
@@ -110,7 +142,7 @@ func main() {
 
 	server := &http.Server{
 		Addr:              cfg.APIAddr,
-		Handler:           httpapi.AccessLog(httpapi.NewServer(st, options...), slog.Default()),
+		Handler:           httpapi.AccessLog(httpapi.NewServer(apiStore, options...), slog.Default()),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       10 * time.Second,
 		WriteTimeout:      15 * time.Second,

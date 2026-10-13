@@ -515,7 +515,7 @@ func (s *Server) listSubmissionArtifacts(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusNotFound, "submission not found")
 		return
 	}
-	artifacts, err := s.store.ListSubmissionArtifacts(r.Context(), id)
+	artifacts, err := s.artifactsForUser(r.Context(), id, user.ID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "list submission artifacts")
 		return
@@ -553,7 +553,7 @@ func (s *Server) getSubmissionArtifact(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "submission not found")
 		return
 	}
-	artifacts, err := s.store.ListSubmissionArtifacts(r.Context(), id)
+	artifacts, err := s.artifactsForUser(r.Context(), id, user.ID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "list submission artifacts")
 		return
@@ -586,6 +586,15 @@ func (s *Server) listLeaderboard(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, entries)
+}
+
+func (s *Server) artifactsForUser(ctx context.Context, id, user string) ([]domain.SubmissionArtifact, error) {
+	if scoped, ok := s.store.(interface {
+		ListSubmissionArtifactsForUser(context.Context, string, string) ([]domain.SubmissionArtifact, error)
+	}); ok {
+		return scoped.ListSubmissionArtifactsForUser(ctx, id, user)
+	}
+	return s.store.ListSubmissionArtifacts(ctx, id)
 }
 
 func decodeAuthRequest(w http.ResponseWriter, r *http.Request, req any) bool {

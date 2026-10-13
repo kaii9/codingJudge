@@ -13,20 +13,23 @@ import (
 )
 
 type MemoryStore struct {
-	mu           sync.RWMutex
-	problems     map[string]domain.Problem
-	submissions  map[string]domain.Submission
-	users        map[string]memoryUser
-	usersByName  map[string]string
-	sessions     map[string]memorySession
-	leases       map[string]memoryLease
-	outbox       map[int64]memoryOutbox
-	artifacts    map[string][]domain.SubmissionArtifact
-	idempotency  map[string]memoryIdempotency
-	nextID       int
-	nextUser     int
-	nextOutbox   int64
-	nextArtifact int64
+	mu              sync.RWMutex
+	problems        map[string]domain.Problem
+	submissions     map[string]domain.Submission
+	users           map[string]memoryUser
+	usersByName     map[string]string
+	sessions        map[string]memorySession
+	leases          map[string]memoryLease
+	outbox          map[int64]memoryOutbox
+	artifacts       map[string][]domain.SubmissionArtifact
+	idempotency     map[string]memoryIdempotency
+	snapshots       map[string]domain.Problem
+	projections     map[string]domain.CompletionEvent
+	processedEvents map[string]bool
+	nextID          int
+	nextUser        int
+	nextOutbox      int64
+	nextArtifact    int64
 }
 
 var (
@@ -75,15 +78,18 @@ type memoryIdempotency struct {
 
 func NewMemoryStore(problems []domain.Problem) *MemoryStore {
 	st := &MemoryStore{
-		problems:    make(map[string]domain.Problem, len(problems)),
-		submissions: make(map[string]domain.Submission),
-		users:       make(map[string]memoryUser),
-		usersByName: make(map[string]string),
-		sessions:    make(map[string]memorySession),
-		leases:      make(map[string]memoryLease),
-		outbox:      make(map[int64]memoryOutbox),
-		artifacts:   make(map[string][]domain.SubmissionArtifact),
-		idempotency: make(map[string]memoryIdempotency),
+		problems:        make(map[string]domain.Problem, len(problems)),
+		submissions:     make(map[string]domain.Submission),
+		users:           make(map[string]memoryUser),
+		usersByName:     make(map[string]string),
+		sessions:        make(map[string]memorySession),
+		leases:          make(map[string]memoryLease),
+		outbox:          make(map[int64]memoryOutbox),
+		artifacts:       make(map[string][]domain.SubmissionArtifact),
+		idempotency:     make(map[string]memoryIdempotency),
+		snapshots:       make(map[string]domain.Problem),
+		projections:     make(map[string]domain.CompletionEvent),
+		processedEvents: make(map[string]bool),
 	}
 	for _, problem := range problems {
 		st.problems[problem.ID] = cloneProblem(problem)
@@ -259,6 +265,9 @@ func (s *MemoryStore) CreateSubmission(ctx context.Context, sub domain.Submissio
 }
 
 func (s *MemoryStore) CreateSubmissionIdempotent(ctx context.Context, sub domain.Submission, idempotencyKey, requestHash string) (domain.Submission, bool, error) {
+	return s.createSubmission(ctx, sub, idempotencyKey, requestHash, nil)
+}
+func (s *MemoryStore) createSubmission(ctx context.Context, sub domain.Submission, idempotencyKey, requestHash string, snapshot *domain.Problem) (domain.Submission, bool, error) {
 	if err := ctx.Err(); err != nil {
 		return domain.Submission{}, false, err
 	}
@@ -285,6 +294,9 @@ func (s *MemoryStore) CreateSubmissionIdempotent(ctx context.Context, sub domain
 	sub.CreatedAt = now
 	sub.UpdatedAt = now
 	s.submissions[sub.ID] = sub
+	if snapshot != nil {
+		s.snapshots[sub.ID] = cloneProblem(*snapshot)
+	}
 	s.nextOutbox++
 	s.outbox[s.nextOutbox] = memoryOutbox{
 		id:            s.nextOutbox,

@@ -158,6 +158,7 @@ type SubmissionArtifact struct {
 
 type Job struct {
 	SubmissionID string `json:"submissionId"`
+	Payload      string `json:"-"`
 	OutboxID     int64  `json:"-"`
 	Attempts     int    `json:"-"`
 	Receipt      string `json:"-"`
@@ -165,6 +166,7 @@ type Job struct {
 
 type OutboxEvent struct {
 	ID              int64
+	Payload         string
 	SubmissionID    string
 	ClaimToken      string
 	PublishAttempts int

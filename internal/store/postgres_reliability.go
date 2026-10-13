@@ -140,6 +140,9 @@ func (s *PostgresStore) RenewSubmissionLease(ctx context.Context, id, token stri
 }
 
 func (s *PostgresStore) CompleteSubmission(ctx context.Context, id, token string, now time.Time, result domain.JudgeResult) (bool, error) {
+	if s.judgeDomain {
+		return s.completeWithEvent(ctx, id, token, now, result)
+	}
 	result.Status = normalizeFinalStatus(result.Status)
 	tag, err := s.pool.Exec(ctx, `
 		UPDATE submissions

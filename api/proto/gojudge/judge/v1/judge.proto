@@ -1,0 +1,69 @@
+syntax = "proto3";
+package gojudge.judge.v1;
+option go_package = "github.com/kaii9/codingJudge/api/gen/judge/v1;judgev1";
+service JudgeService {
+ rpc CreateSubmission(CreateRequest) returns (CreateResponse);
+ rpc FindSubmission(FindRequest) returns (FindResponse);
+ rpc GetSubmission(SubmissionQuery) returns (SubmissionRecord);
+ rpc ListSubmissions(UserQuery) returns (SubmissionList);
+ rpc ListArtifacts(SubmissionQuery) returns (ArtifactList);
+ rpc GetArtifact(ArtifactQuery) returns (ArtifactData);
+}
+message ProblemSnapshot {
+ string problem_id = 1;
+ int32 time_limit_ms = 2;
+ int32 memory_limit_mb = 3;
+ repeated TestCase cases = 4;
+}
+message TestCase {
+ int64 id = 1;
+ string input = 2;
+ string expected_output = 3;
+ string input_object_key = 4;
+ string output_object_key = 5;
+ string input_sha256 = 6;
+ string output_sha256 = 7;
+ int64 input_size = 8;
+ int64 output_size = 9;
+ bool hidden = 10;
+}
+message CreateRequest {
+ string user_id = 1;
+ string problem_id = 2;
+ string language = 3;
+ string code = 4;
+ string idempotency_key = 5;
+ string request_hash = 6;
+ ProblemSnapshot snapshot = 7;
+}
+message CreateResponse { SubmissionRecord submission = 1; bool replayed = 2; }
+message FindRequest { string user_id = 1; string idempotency_key = 2; }
+message FindResponse { SubmissionRecord submission = 1; string request_hash = 2; bool found = 3; }
+message SubmissionQuery { string user_id = 1; string submission_id = 2; }
+message UserQuery { string user_id = 1; }
+message SubmissionRecord {
+ string id = 1;
+ string user_id = 2;
+ string problem_id = 3;
+ string language = 4;
+ string code = 5;
+ string status = 6;
+ int64 created_at_unix_nano = 7;
+ int64 updated_at_unix_nano = 8;
+ Verdict result = 9;
+}
+message Verdict { string status = 1; string stdout = 2; string stderr = 3; int32 exit_code = 4; int64 duration_ms = 5; }
+message SubmissionList { repeated SubmissionRecord submissions = 1; }
+message Artifact {
+ int64 id = 1;
+ string submission_id = 2;
+ int32 attempt = 3;
+ string kind = 4;
+ string sha256 = 5;
+ int64 size_bytes = 6;
+ int64 created_at_unix_nano = 7;
+}
+message ArtifactList { repeated Artifact artifacts = 1; }
+message ArtifactQuery { string user_id = 1; string submission_id = 2; int64 artifact_id = 3; }
+message ArtifactData { bytes content = 1; }
+

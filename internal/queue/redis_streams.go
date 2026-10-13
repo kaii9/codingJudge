@@ -235,11 +235,15 @@ func (q *RedisStreamsQueue) deadLetterMalformed(ctx context.Context, message red
 }
 
 func redisStreamValues(job domain.Job) map[string]any {
-	return map[string]any{
+	values := map[string]any{
 		"submission_id": job.SubmissionID,
 		"outbox_id":     job.OutboxID,
 		"attempt":       job.Attempts,
 	}
+	if job.Payload != "" {
+		values["payload"] = job.Payload
+	}
+	return values
 }
 
 func retryStreamValues(job domain.Job, cause error) map[string]any {
@@ -267,7 +271,15 @@ func redisStreamJob(values map[string]any) (domain.Job, error) {
 	if err != nil {
 		return domain.Job{}, fmt.Errorf("redis stream job has invalid outbox_id: %w", err)
 	}
-	return domain.Job{SubmissionID: submissionID, OutboxID: outboxID, Attempts: attempts}, nil
+	job := domain.Job{SubmissionID: submissionID, OutboxID: outboxID, Attempts: attempts}
+	if payload, exists := values["payload"]; exists {
+		text, ok := payload.(string)
+		if !ok || len(text) > 16<<10 {
+			return domain.Job{}, fmt.Errorf("invalid event payload")
+		}
+		job.Payload = text
+	}
+	return job, nil
 }
 
 func redisStreamInt64(raw any) (int64, error) {

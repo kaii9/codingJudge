@@ -36,7 +36,12 @@ func main() {
 	workerCtx, cancelWorker := context.WithCancel(ctx)
 	defer cancelWorker()
 
-	st, err := store.NewPostgresStore(ctx, cfg.DatabaseURL)
+	var st *store.PostgresStore
+	if os.Getenv("JUDGE_DOMAIN") == "true" {
+		st, err = store.NewJudgePostgresStore(ctx, cfg.DatabaseURL)
+	} else {
+		st, err = store.NewPostgresStore(ctx, cfg.DatabaseURL)
+	}
 	if err != nil {
 		slog.Error("worker store setup failed", "error", err)
 		os.Exit(1)

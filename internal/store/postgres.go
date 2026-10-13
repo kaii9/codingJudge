@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"time"
 
@@ -13,7 +14,8 @@ import (
 )
 
 type PostgresStore struct {
-	pool *pgxpool.Pool
+	pool        *pgxpool.Pool
+	judgeDomain bool
 }
 
 func NewPostgresStore(ctx context.Context, databaseURL string) (*PostgresStore, error) {
@@ -230,6 +232,10 @@ func (s *PostgresStore) CreateSubmission(ctx context.Context, sub domain.Submiss
 }
 
 func (s *PostgresStore) CreateSubmissionIdempotent(ctx context.Context, sub domain.Submission, idempotencyKey, requestHash string) (domain.Submission, bool, error) {
+	return s.createSubmission(ctx, sub, idempotencyKey, requestHash, nil)
+}
+
+func (s *PostgresStore) createSubmission(ctx context.Context, sub domain.Submission, idempotencyKey, requestHash string, snapshot *domain.Problem) (domain.Submission, bool, error) {
 	if idempotencyKey == "" {
 		requestHash = ""
 	}
@@ -286,6 +292,15 @@ func (s *PostgresStore) CreateSubmissionIdempotent(ctx context.Context, sub doma
 		VALUES ($1)
 	`, sub.ID); err != nil {
 		return domain.Submission{}, false, err
+	}
+	if snapshot != nil {
+		data, marshalErr := json.Marshal(snapshot)
+		if marshalErr != nil {
+			return domain.Submission{}, false, marshalErr
+		}
+		if _, err := tx.Exec(ctx, "INSERT INTO submission_problem_snapshots(submission_id,snapshot) VALUES($1,$2)", sub.ID, data); err != nil {
+			return domain.Submission{}, false, err
+		}
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return domain.Submission{}, false, err
