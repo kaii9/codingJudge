@@ -37,7 +37,11 @@ bash scripts/verify-microservices.sh
 bash scripts/verify-microservices-faults.sh
 ```
 
-公开 API：`http://localhost:28080`。可选前端：
+公开 API：`http://localhost:28080`。
+
+若 Docker Desktop 中暂停了本项目容器，先用 `docker compose -f deploy/compose/microservices.yml ps` 检查。确认显示 Paused 后，可运行 `docker compose -f deploy/compose/microservices.yml unpause postgres redis minio judge-api platform worker executor executor-b` 恢复本项目；暂停状态下 HTTP 验收请求不会得到响应。
+
+可选前端：
 
 ```bash
 docker compose -f deploy/compose/microservices.yml --profile frontend up -d --build frontend

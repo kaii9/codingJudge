@@ -4,6 +4,16 @@
 
 合并后重新执行 go test ./... -count=1、重点八包 race -count=1 和 go vet ./...，均通过。原有未跟踪架构文档未修改。临时工作树中的审查 ledger 已保留到主目录的 .superpowers/sdd/2026-10-13-gojudge-microservices。
 
+## 原目标闭环
+
+| 能力 | 实现 | 验收依据 |
+|---|---|---|
+| 服务边界 | 平台 / 判题 / Executor 三域；Judge API 与 Worker 同属判题域，只有 Executor 持有 Docker Socket | 运行中平台、Judge API、Worker mounts 均为空；真实三语言判题 |
+| 数据归属 | 两个数据库与独立账户；提交使用不可变题目快照；排行榜消费结果投影 | 跨库 CONNECT 被拒绝；快照重放、原子事件、去重和迟到事件集成测试 |
+| 调用治理 | gRPC 鉴权、deadline、取消、有界 admission、Health/Watch、三次 attempt 与独立收尾预算 | 真实 loopback RPC 故障测试；任务连续超时最终终止；无隐式 RunBatch 重放 |
+| 独立部署 | 独立镜像和迁移 target；旧协议 fixture；兼容的公开 HTTP API | 重建一个 Executor 时平台、Judge API、Worker 容器 ID 不变 |
+| 故障验证 | 租约接管、fencing、结果 Outbox 与幂等投影、drain 和孤儿沙箱清理 | 实际 SIGKILL / 强制 drain 后第 2 次 attempt 达到 AC；旧 token 被拒绝；两条 Stream Pending 归零 |
+
 ## 已执行的验证
 
 | 验证 | 结果 |
@@ -19,8 +29,8 @@
 | 排行榜 | 三次 AC 同一题，solved=1、acceptedSubmissions=3 |
 | Redis Streams | 判题与结果两条 Stream 的 Pending 均归零 |
 | verify-microservices-faults.sh | 活跃沙箱期间 SIGKILL、100ms grace 的实际 SIGTERM，各在第 2 次 attempt 达到 AC；默认 30 秒 grace 已还原 |
-| Playwright | 最终复测 5 passed，2 skipped（desktop/mobile 项目中的条件性跳过），40.4 秒 |
-| trace context 持久化 | judge_outbox 已观察到 7 条非空 traceparent；未配置 OTLP Collector，不宣称追踪 UI 已部署 |
+| Playwright | 主目录最终复测 5 passed，2 skipped（desktop/mobile 项目中的条件性跳过），25.4 秒 |
+| trace context 持久化 | 主目录复测已观察到 28 条非空 trace_parent；未配置 OTLP Collector，不宣称追踪 UI 已部署 |
 
 ## 真实验收暴露并修复的问题
 
@@ -40,7 +50,15 @@ Docker 自动移除和强制移除同时发生时，原清理会返回 already i
 - 强制 drain 原先返回永久 canceled：调用方仍存活时把服务端退出归为可重试故障；显式下一 attempt 选择健康实例，保留无隐式 RPC 重放。
 - 已取消的容量等待者可能拿到刚释放的槽：在 admission commit 锁内再次检查取消并释放槽位。
 
-最终故障复测提交：SIGKILL 为 sub-aef40e17-b888-4b3c-af12-6b6c745f56c2；forced-drain 为 sub-0c729c4b-e371-4ce2-8832-84d95eb7fc62，均 attempts=2、final=accepted。最后一轮真实 Docker integration 全部通过，重点八包 race 和 go test ./... -count=1 通过。
+删除临时工作树后的主目录故障复测：SIGKILL 为 sub-81da72a3-c213-467c-bad3-be493b44d4a4；forced-drain 为 sub-d00d2b45-d418-49cb-a6e4-6a6ff6cd8ea2，均 attempts=2、final=accepted。主目录完整验收脚本亦通过，说明运行不依赖已删除的工作树。最后一轮真实 Docker integration 全部通过，重点八包 race 和 go test ./... -count=1 通过。
+
+## 收尾状态
+
+- 已合并到本地 main，临时 feat/gojudge-microservices 分支和工作树已删除；所有源码提交仍保留在 main。
+- PostgreSQL 初始化脚本挂载已切换到主目录，仍使用原微服务数据卷；切换前后 21 条提交和 12 个用户数量一致。后续验收生成的新测试数据另行保留，未清空既有数据。
+- 用户原有未跟踪架构文档 SHA256 保持 5c26ae9ad533b80d608d70ee1bed455160057b519fefc2ce2784158d586a463f，未纳入本次提交。
+- 恢复验收时本项目八个容器处于 Paused，仅 unpause 这八个服务后恢复 ready；主目录部署验收、两种运行中故障和浏览器 E2E 均通过。该过程未修改业务实现。
+- 原四阶段计划没有未完成项；未执行推送或新增生产环境部署。
 
 ## 验证边界
 
