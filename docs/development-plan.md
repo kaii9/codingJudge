@@ -260,7 +260,7 @@ Acceptance:
 
 ## Phase 12: Three-domain Microservice Evolution
 
-Status: implemented on feat/gojudge-microservices; not merged or pushed. Local verification and limitations are recorded in [the microservice verification report](microservices-verification-2026-10-14.md).
+Status: implemented and merged into local main on 2026-10-14; not pushed. Local verification and limitations are recorded in [the microservice verification report](microservices-verification-2026-10-14.md).
 
 Goal: make service boundaries, data ownership, governed calls and independent rollout concrete, while preserving public HTTP routes and the original deployment mode.
 

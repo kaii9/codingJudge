@@ -1,6 +1,8 @@
 # 微服务改造验收记录
 
-日期：2026-10-14（Asia/Shanghai）。开发分支：feat/gojudge-microservices。源码初次验收提交：28db4f3；审查修正源码提交：a97ec5c。四阶段完成，本地验收通过；尚未合并或推送。
+日期：2026-10-14（Asia/Shanghai）。来源分支：feat/gojudge-microservices。源码初次验收提交：28db4f3；审查修正源码提交：a97ec5c；已按用户选择将 1531538 快进合并到本地 main。四阶段完成，本地验收通过，尚未推送。
+
+合并后重新执行 go test ./... -count=1、重点八包 race -count=1 和 go vet ./...，均通过。原有未跟踪架构文档未修改。临时工作树中的审查 ledger 已保留到主目录的 .superpowers/sdd/2026-10-13-gojudge-microservices。
 
 ## 已执行的验证
 
