@@ -2,6 +2,29 @@
 
 本模式把现有项目拆成三个业务域：平台负责身份和题库，判题域负责 submission、快照、租约、结果和 Outbox，Executor 负责 Docker 执行。判题 API 与 Worker 共享同一个判题数据库，因为它们属于同一个业务域。
 
+```mermaid
+flowchart LR
+  Browser[浏览器] --> Platform[平台 API]
+  Platform --> PlatformDB[(平台数据库)]
+  Platform -->|gRPC + 身份 + 快照| JudgeAPI[判题 API]
+  subgraph JudgeDomain[判题业务域]
+    JudgeAPI --> JudgeDB[(判题数据库)]
+    JudgeDB --> Relay[Outbox Relay]
+    Relay --> Stream[Redis 判题 Stream]
+    Stream --> Worker[判题 Worker]
+    Worker -->|租约与 fenced 结果| JudgeDB
+  end
+  Worker -->|gRPC RunBatch| ExecutorA[Executor A]
+  Worker -->|gRPC RunBatch| ExecutorB[Executor B]
+  ExecutorA --> Docker[本地 Docker daemon]
+  ExecutorB --> Docker
+  Relay --> ResultStream[结果 Stream]
+  ResultStream --> Projector[平台投影消费者]
+  Projector --> PlatformDB
+```
+
+实际测试证据见 [2026-10-14 验收记录](microservices-verification-2026-10-14.md)。
+
 ## 启动与验收
 
 ```bash
@@ -11,6 +34,7 @@ for service in platform judge-api worker executor migrate-platform; do
 done
 docker compose -f deploy/compose/microservices.yml up -d --no-build --wait
 bash scripts/verify-microservices.sh
+bash scripts/verify-microservices-faults.sh
 ```
 
 公开 API：`http://localhost:28080`。可选前端：
@@ -67,6 +91,7 @@ make proto
 - 平台调用判题服务使用 5 秒 deadline。
 - Worker 到 Executor 使用配置的 EXECUTOR_TIMEOUT，默认 120 秒。
 - Worker 单次处理总预算默认 3 分钟，包括资产与落盘；租约心跳延伸到产物、结果持久化。
+- 执行预算耗尽后，使用仍受 Worker 停机取消控制的独立 5 秒收尾预算进行 fenced 重试/终止；默认最多执行 3 次。崩溃后接管时若计数已超限，不再执行用户代码。
 - Executor 限制执行槽位与等待请求数，等待超时返回过载。
 - 标准 gRPC Health/Watch 配合 round_robin，避开 NOT_SERVING 实例并允许恢复。
 - 参数、鉴权、协议错误不重复判题；业务 WA/CE/RE/TLE 是正常响应。
@@ -78,6 +103,8 @@ make proto
 ## 退出和孤儿容器
 
 Executor 标记 NOT_SERVING，停止接新请求，等待在途任务；宽限期后取消并给容器清理留出时间。主进程等待退出流程，而不是启动 Shutdown goroutine 后立即退出。
+
+服务端 drain 取消且调用方仍存活时返回可重试的不可用错误，不把它当成调用方主动取消。故障脚本先实际 SIGKILL，再以 100ms 宽限期实际 SIGTERM，在健康实例恢复到 AC；退出时还原默认 30 秒宽限期。可用 CJ_MICRO_EXECUTOR_SHUTDOWN_GRACE 控制该演示参数。
 
 容器带 `gojudge.executor` 标签。重启 Executor 只清理自身实例标签且名称为 codingjudge-exec-* 的沙箱。给每个实例配置唯一、稳定的 `EXECUTOR_INSTANCE_ID`；不能让不同活跃实例共享同一个 ID。
 
@@ -120,7 +147,7 @@ PLAYWRIGHT_BASE_URL=http://localhost:23000 npm --prefix frontend run test:e2e
 
 专用数据库集成测试在随机 schema 中验证，测试后只清理自己的 schema。不要把已有 legacy 集成测试的 TEST_DATABASE_URL 指向重要数据。
 
-验收脚本检查真实三语言判题、排行榜收敛、单 Executor 停机、独立重新部署、历史/产物下载及两条 Stream 的 Pending 归零。deadline、取消、过载、响应丢失和旧协议 fixture 由真实 loopback RPC 测试补充。
+验收脚本检查真实三语言判题、排行榜收敛、单 Executor 停机、独立重新部署、历史/产物下载及两条 Stream 的 Pending 归零。故障脚本额外检查活跃沙箱期间 SIGKILL 与 SIGTERM 宽限期耗尽后的 attempt 恢复。deadline、取消、过载、响应丢失和旧协议 fixture 由真实 loopback RPC 测试补充。
 
 ## 已有数据如何迁移
 

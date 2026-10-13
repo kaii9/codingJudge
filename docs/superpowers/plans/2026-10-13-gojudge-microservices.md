@@ -33,16 +33,16 @@
 
 **Interfaces:** Consumes judge.Runner/BatchRunner. Produces authenticated gRPC RunBatch, typed CallError, bounded admission, health-aware client and drain lifecycle.
 
-- [ ] Add cancellation and invalid-input regression tests around the real server. Example:
+- [x] Add cancellation and invalid-input regression tests around the real server. Example:
 ```go
 func TestExecutorRejectsOversubscribedWaiters(t *testing.T) {
     // Hold one real RPC open; fill the one waiting slot.
     // A third call must return ResourceExhausted without invoking Runner.
 }
 ```
-- [ ] Run focused tests and record RED output before implementation.
-- [ ] Define versioned protobuf, generate Go stubs, implement adapters and deadline/health/auth behavior.
-- [ ] Add a real two-server failover/recovery test and a lost-response test; prove no implicit execution replay.
+- [x] Run focused tests and record RED output before implementation.
+- [x] Define versioned protobuf, generate Go stubs, implement adapters and deadline/health/auth behavior.
+- [x] Add a real two-server failover/recovery test and a lost-response test; prove no implicit execution replay.
 - [x] Run `go test -race ./internal/executor ./internal/config ./cmd/executor`; commit governed executor slice.
 
 ## Task 2: Extract judge domain and immutable problem snapshots
@@ -51,17 +51,17 @@ func TestExecutorRejectsOversubscribedWaiters(t *testing.T) {
 
 **Interfaces:** Consumes executor protocol and existing store APIs. Produces Create/Get/List/Find RPCs and platform store adapter; snapshot lookup by submission ID.
 
-- [ ] Write integration test that creates a submission with a snapshot, updates catalog, then judges the first snapshot. Example:
+- [x] Write integration test that creates a submission with a snapshot, updates catalog, then judges the first snapshot. Example:
 ```go
 func TestSubmissionReplayKeepsOriginalSnapshot(t *testing.T) {
     // Create with v1, repeat same client fingerprint carrying v2.
     // Exactly one submission/outbox and stored snapshot remains v1.
 }
 ```
-- [ ] Run RED, then implement snapshot/submission/outbox transaction and per-user RPC ownership.
-- [ ] Add platform adapter; preserve public Handler validation and response behavior.
-- [ ] Create separate migration sets and accounts; test unauthorized cross-domain SQL fails.
-- [ ] Run store/judgerpc/platform tests and full Go suite; commit judge-domain extraction.
+- [x] Run RED, then implement snapshot/submission/outbox transaction and per-user RPC ownership.
+- [x] Add platform adapter; preserve public Handler validation and response behavior.
+- [x] Create separate migration sets and accounts; test unauthorized cross-domain SQL fails.
+- [x] Run store/judgerpc/platform tests and full Go suite; commit judge-domain extraction.
 
 ## Task 3: Reliable completion events and leaderboard projection
 
@@ -69,17 +69,17 @@ func TestSubmissionReplayKeepsOriginalSnapshot(t *testing.T) {
 
 **Interfaces:** Consumes final fenced completion. Produces SubmissionFinished outbox and idempotent platform projection.
 
-- [ ] Write duplicate-event and rollback tests. Example:
+- [x] Write duplicate-event and rollback tests. Example:
 ```go
 func TestDuplicateAcceptedEventCountsOneSolvedProblem(t *testing.T) {
     // Apply identical event twice and two AC submissions for one problem.
     // solved=1, accepted submissions=2.
 }
 ```
-- [ ] Run RED and implement result/event atomic transaction.
-- [ ] Implement separate Stream relay/consumer with per-event dedupe transaction and version checks.
-- [ ] Connect platform leaderboard to local projection; validate one user's multiple cases.
-- [ ] Run focused integration and whole suite; commit projection slice.
+- [x] Run RED and implement result/event atomic transaction.
+- [x] Implement separate Stream relay/consumer with per-event dedupe transaction and version checks.
+- [x] Connect platform leaderboard to local projection; validate one user's multiple cases.
+- [x] Run focused integration and whole suite; commit projection slice.
 
 ## Task 4: Independent deployment, tracing and fault acceptance
 
@@ -87,15 +87,17 @@ func TestDuplicateAcceptedEventCountsOneSolvedProblem(t *testing.T) {
 
 **Interfaces:** Consumes domain processes and streams. Produces separately deployable targets and full-system evidence.
 
-- [ ] Write process-level shutdown and mixed-version contract tests.
-- [ ] Run RED; add await-drain lifecycle and independent image targets.
-- [ ] Propagate trace identifiers over RPC/outbox messages without sensitive payload logging.
-- [ ] Start isolated Compose project, run real Go/C++/Python jobs, ownership checks, kill/slow/drop-response/drain scenarios and projection checks.
-- [ ] Run `go test ./...`, race, vetted configuration and available frontend E2E. Record actual results and limitations; commit deployment slice.
+- [x] Write process-level shutdown and mixed-version contract tests.
+- [x] Run RED; add await-drain lifecycle and independent image targets.
+- [x] Propagate trace identifiers over RPC/outbox messages without sensitive payload logging.
+- [x] Start isolated Compose project, run real Go/C++/Python jobs, ownership checks, kill/slow/drop-response/drain scenarios and projection checks.
+- [x] Run `go test ./...`, race, vetted configuration and available frontend E2E. Record actual results and limitations; commit deployment slice.
 
 ## Completion
 
-- [ ] Perform fresh-context whole-branch review; resolve critical/important findings with regression tests.
-- [ ] Update README/development-plan with actual shipped capabilities and precise evidence.
-- [ ] Leave branch and workspace reviewable; do not merge or push.
+- [x] Perform fresh-context whole-branch review; resolve critical/important findings with regression tests.
+- [x] Update README/development-plan with actual shipped capabilities and precise evidence.
+- [x] Leave branch and workspace reviewable; do not merge or push.
+
+Final source: a97ec5c. Full local evidence, review repairs and explicit non-production claims: [verification report](../../microservices-verification-2026-10-14.md). Primary main and its untracked architecture document were preserved.
 

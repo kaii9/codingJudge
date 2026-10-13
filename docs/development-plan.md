@@ -258,6 +258,32 @@ Acceptance:
 - Prometheus reports two healthy executor targets.
 - The topology benchmark records complete balanced trials, all-accepted outcomes, positive queue pressure and slot use, exact executor batch totals, and restores the development stack and temporary benchmark settings on exit.
 
+## Phase 12: Three-domain Microservice Evolution
+
+Status: implemented on feat/gojudge-microservices; not merged or pushed. Local verification and limitations are recorded in [the microservice verification report](microservices-verification-2026-10-14.md).
+
+Goal: make service boundaries, data ownership, governed calls and independent rollout concrete, while preserving public HTTP routes and the original deployment mode.
+
+Shipped:
+
+- Platform owns identity/catalog; Judge API and Worker own submissions, immutable snapshots, leases, artifacts and outboxes in a separate database.
+- Separate PostgreSQL accounts cannot CONNECT to the other domain; no runtime cross-domain table access.
+- Authenticated, versioned Judge and Executor gRPC protocols; frozen old Executor fixture for compatibility.
+- Deadline propagation, bounded admission, Health/Watch selection, explicit Worker retry budget and awaited Executor drain; no implicit RunBatch replay.
+- Fenced result plus completion event in one transaction; deduplicated, versioned platform projection for the leaderboard.
+- Separate platform/judge-api/worker/executor/migrate image targets and isolated Compose deployment.
+- OpenTelemetry context propagation through HTTP, RPC, Outbox and Streams; optional OTLP export and optional mTLS configuration.
+- Real three-language execution, private-database integration, in-flight Executor fault recovery and existing browser E2E validation.
+
+Remaining scope:
+
+- Do not interpret local shared-daemon results as independent physical-node scaling.
+- Production orchestration, a deployed tracing backend and remote mTLS rollout are not claimed.
+- Existing database migration requires explicit import and projection rebuild; legacy volumes are untouched.
+- CI includes the new topology, but remote CI evidence requires a later user-authorized push.
+
+See [startup, call boundaries and testing](microservices-guide.md).
+
 ## Current Development Slice
 
 The backend MVP, browser demo, reliable multi-worker phase, curated problem library, observability/load testing, authentication, MinIO assets, submission admission control, sandbox executor boundary, reproducible dual-runtime deployment, and controlled local topology benchmark are complete. The next executor reliability task is health-aware endpoint removal and recovery. Production service discovery/TLS, an independent-machine saturation benchmark, and cursor pagination plus a unified OpenAPI/error contract remain future work.
