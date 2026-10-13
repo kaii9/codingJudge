@@ -100,4 +100,3 @@ func TestDuplicateAcceptedEventCountsOneSolvedProblem(t *testing.T) {
 - [x] Leave branch and workspace reviewable; do not merge or push.
 
 Final source: a97ec5c. Full local evidence, review repairs and explicit non-production claims: [verification report](../../microservices-verification-2026-10-14.md). Primary main and its untracked architecture document were preserved.
-

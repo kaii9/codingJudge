@@ -4,4 +4,3 @@ CREATE TABLE submission_projection(
  status TEXT NOT NULL,version INTEGER NOT NULL CHECK(version>0),finished_at TIMESTAMPTZ NOT NULL
 );
 CREATE INDEX submission_projection_accepted_idx ON submission_projection(user_id,problem_id,finished_at) WHERE status='accepted';
-

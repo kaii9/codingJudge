@@ -157,4 +157,3 @@ volumes:
   micro-postgres:
   micro-redis:
   micro-minio:
-

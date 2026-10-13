@@ -66,4 +66,3 @@ message Artifact {
 message ArtifactList { repeated Artifact artifacts = 1; }
 message ArtifactQuery { string user_id = 1; string submission_id = 2; int64 artifact_id = 3; }
 message ArtifactData { bytes content = 1; }
-

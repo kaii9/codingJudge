@@ -61,4 +61,3 @@ verify_recovery() {
 
 verify_recovery SIGKILL
 verify_recovery forced-drain
-

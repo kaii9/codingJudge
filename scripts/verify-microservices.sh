@@ -80,4 +80,3 @@ done
 test "$pending" = 0
 test "$results_pending" = 0
 printf 'judge and result streams drained; verification passed\n'
-

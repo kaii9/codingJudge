@@ -17,4 +17,3 @@ message Result {
  string stage=6;
 }
 message Response { repeated Result results=1; }
-

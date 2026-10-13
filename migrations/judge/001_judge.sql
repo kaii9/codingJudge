@@ -35,4 +35,3 @@ CREATE TABLE submission_artifacts (
  UNIQUE(submission_id,attempt,fencing_token,kind)
 );
 CREATE INDEX submission_artifacts_submission_idx ON submission_artifacts(submission_id,id);
-

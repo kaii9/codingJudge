@@ -43,4 +43,3 @@ FROM app-base AS migrate
 COPY --from=build-migrate /out/migrate /app/migrate
 COPY migrations /app/migrations
 ENTRYPOINT ["/app/migrate"]
-

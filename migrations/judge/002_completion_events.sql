@@ -6,4 +6,3 @@ CREATE TABLE completion_outbox(
  next_attempt_at TIMESTAMPTZ NOT NULL DEFAULT now(),last_error TEXT
 );
 CREATE INDEX completion_outbox_publish_idx ON completion_outbox(next_attempt_at,id) WHERE published_at IS NULL;
-
