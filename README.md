@@ -41,6 +41,8 @@ Observability: slog + Prometheus + Grafana
 
 ## Architecture
 
+新增可选 [微服务部署与验收模式](docs/microservices-guide.md)：平台与判题域使用独立数据库账号，内部使用版本化 gRPC；判题快照、完成事件和排行榜读模型保持可靠性，Executor 支持健康选择、有界等待、取消和独立退出。原有部署路径保留。
+
 ```mermaid
 flowchart LR
     Browser[Browser] --> Frontend[Next.js frontend<br/>Monaco workbench]

@@ -243,6 +243,9 @@ func redisStreamValues(job domain.Job) map[string]any {
 	if job.Payload != "" {
 		values["payload"] = job.Payload
 	}
+	if job.TraceParent != "" {
+		values["traceparent"] = job.TraceParent
+	}
 	return values
 }
 
@@ -272,6 +275,13 @@ func redisStreamJob(values map[string]any) (domain.Job, error) {
 		return domain.Job{}, fmt.Errorf("redis stream job has invalid outbox_id: %w", err)
 	}
 	job := domain.Job{SubmissionID: submissionID, OutboxID: outboxID, Attempts: attempts}
+	if parent, exists := values["traceparent"]; exists {
+		value, ok := parent.(string)
+		if !ok || len(value) > 256 {
+			return domain.Job{}, fmt.Errorf("invalid trace context")
+		}
+		job.TraceParent = value
+	}
 	if payload, exists := values["payload"]; exists {
 		text, ok := payload.(string)
 		if !ok || len(text) > 16<<10 {

@@ -3,12 +3,13 @@ package executor
 import (
 	"context"
 	"errors"
+	"google.golang.org/grpc"
 	"net"
 	"net/http"
 	"time"
 )
 
-func Serve(ctx context.Context, httpAddr, grpcAddr string, core *Server, grace time.Duration) error {
+func Serve(ctx context.Context, httpAddr, grpcAddr string, core *Server, grace time.Duration, options ...grpc.ServerOption) error {
 	httpListener, err := net.Listen("tcp", httpAddr)
 	if err != nil {
 		return err
@@ -19,7 +20,7 @@ func Serve(ctx context.Context, httpAddr, grpcAddr string, core *Server, grace t
 		return err
 	}
 	defer rpcListener.Close()
-	rpc := NewGRPCServer(core)
+	rpc := NewGRPCServer(core, options...)
 	httpServer := &http.Server{Handler: core.Handler(), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 15 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 16 << 10}
 	errs := make(chan error, 2)
 	go func() { errs <- rpc.Serve(rpcListener) }()
@@ -56,7 +57,11 @@ func Serve(ctx context.Context, httpAddr, grpcAddr string, core *Server, grace t
 	stopProbe()
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), grace)
 	defer cancel()
-	_ = core.Drain(shutdownCtx)
+	if err := core.Drain(shutdownCtx); err != nil {
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		_ = core.Drain(cleanupCtx)
+		cleanupCancel()
+	}
 	rpcDone := make(chan struct{})
 	go func() { rpc.GracefulStop(); close(rpcDone) }()
 	_ = httpServer.Shutdown(shutdownCtx)

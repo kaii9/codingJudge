@@ -16,7 +16,9 @@ import (
 	"github.com/kaii9/codingJudge/internal/metrics"
 	"github.com/kaii9/codingJudge/internal/objectstore"
 	"github.com/kaii9/codingJudge/internal/queue"
+	"github.com/kaii9/codingJudge/internal/rpcsecurity"
 	"github.com/kaii9/codingJudge/internal/store"
+	"github.com/kaii9/codingJudge/internal/telemetry"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/collectors"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -31,6 +33,12 @@ func main() {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	shutdownTracing, err := telemetry.Init("gojudge-worker")
+	if err != nil {
+		slog.Error("tracing setup failed", "error", err)
+		os.Exit(1)
+	}
+	defer shutdownTracing()
 
 	// 可被子系统（如 metrics serve 失败）取消的 worker 上下文。
 	workerCtx, cancelWorker := context.WithCancel(ctx)
@@ -82,7 +90,12 @@ func main() {
 	if len(cfg.ExecutorURLs) > 0 {
 		if cfg.ExecutorProtocol == "grpc" {
 			var rpcPool *executor.GRPCClientPool
-			rpcPool, err = executor.NewGRPCClientPool(cfg.ExecutorURLs, cfg.ExecutorToken, cfg.ExecutorTimeout)
+			rpcOptions, tlsErr := rpcsecurity.ClientOptions(os.Getenv)
+			if tlsErr != nil {
+				slog.Error("RPC TLS setup failed", "error", tlsErr)
+				os.Exit(1)
+			}
+			rpcPool, err = executor.NewGRPCClientPool(cfg.ExecutorURLs, cfg.ExecutorToken, cfg.ExecutorTimeout, rpcOptions...)
 			if err == nil {
 				runner = rpcPool
 				defer rpcPool.Close()

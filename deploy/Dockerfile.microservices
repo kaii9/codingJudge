@@ -1,0 +1,46 @@
+FROM golang:1.25-alpine AS source
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+
+FROM source AS build-platform
+RUN --mount=type=cache,target=/root/.cache/go-build GOMAXPROCS=2 CGO_ENABLED=0 GOOS=linux go build -p 2 -o /out/platform ./cmd/api
+FROM source AS build-judge
+RUN --mount=type=cache,target=/root/.cache/go-build GOMAXPROCS=2 CGO_ENABLED=0 GOOS=linux go build -p 2 -o /out/judge-api ./cmd/judge-api
+FROM source AS build-worker
+RUN --mount=type=cache,target=/root/.cache/go-build GOMAXPROCS=2 CGO_ENABLED=0 GOOS=linux go build -p 2 -o /out/worker ./cmd/worker
+FROM source AS build-executor
+RUN --mount=type=cache,target=/root/.cache/go-build GOMAXPROCS=2 CGO_ENABLED=0 GOOS=linux go build -p 2 -o /out/executor ./cmd/executor
+FROM source AS build-migrate
+RUN --mount=type=cache,target=/root/.cache/go-build GOMAXPROCS=2 CGO_ENABLED=0 GOOS=linux go build -p 2 -o /out/migrate ./cmd/migrate
+
+FROM alpine:3.20 AS app-base
+RUN apk add --no-cache ca-certificates
+WORKDIR /app
+
+FROM app-base AS platform
+COPY --from=build-platform /out/platform /app/api
+EXPOSE 8080
+CMD ["/app/api"]
+
+FROM app-base AS judge-api
+COPY --from=build-judge /out/judge-api /app/judge-api
+EXPOSE 8092 9092
+CMD ["/app/judge-api"]
+
+FROM app-base AS worker
+COPY --from=build-worker /out/worker /app/worker
+CMD ["/app/worker"]
+
+FROM app-base AS executor
+RUN apk add --no-cache docker-cli
+COPY --from=build-executor /out/executor /app/executor
+EXPOSE 8090 8091
+CMD ["/app/executor"]
+
+FROM app-base AS migrate
+COPY --from=build-migrate /out/migrate /app/migrate
+COPY migrations /app/migrations
+ENTRYPOINT ["/app/migrate"]
+

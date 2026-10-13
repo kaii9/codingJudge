@@ -9,6 +9,7 @@ import (
 
 	pb "github.com/kaii9/codingJudge/api/gen/executor/v1"
 	"github.com/kaii9/codingJudge/internal/judge"
+	"github.com/kaii9/codingJudge/internal/telemetry"
 	"google.golang.org/grpc"
 	_ "google.golang.org/grpc/balancer/roundrobin"
 	"google.golang.org/grpc/codes"
@@ -45,6 +46,7 @@ func NewGRPCClientPool(endpoints []string, token string, timeout time.Duration, 
 	}
 	builder.InitialState(resolver.State{Addresses: addresses})
 	opts := []grpc.DialOption{grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithResolvers(builder), grpc.WithDefaultServiceConfig(`{"loadBalancingConfig":[{"round_robin":{}}],"healthCheckConfig":{"serviceName":""}}`), grpc.WithDisableRetry(), grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(maxResponseBytes), grpc.MaxCallSendMsgSize(maxRequestBytes))}
+	opts = append(opts, grpc.WithChainUnaryInterceptor(telemetry.ClientUnary))
 	opts = append(opts, options...)
 	conn, err := grpc.NewClient("gojudge-executor:///pool", opts...)
 	if err != nil {
@@ -64,7 +66,7 @@ func (c *GRPCClientPool) RunBatch(ctx context.Context, r judge.RunRequest, input
 	ctx, cancel := context.WithTimeout(ctx, c.timeout)
 	defer cancel()
 	ctx = metadata.AppendToOutgoingContext(ctx, "authorization", "Bearer "+c.token)
-	response, err := c.client.RunBatch(ctx, &pb.RunBatchRequest{Language: string(r.Language), Code: r.Code, Inputs: inputs, TimeLimitMs: int32(r.TimeLimitMS), MemoryLimitMb: int32(r.MemoryLimitMB)}, grpc.WaitForReady(true))
+	response, err := c.client.RunBatch(ctx, &pb.RunBatchRequest{Language: string(r.Language), Code: r.Code, Inputs: inputs, TimeLimitMs: int32(r.TimeLimitMS), MemoryLimitMb: int32(r.MemoryLimitMB), ExecutionId: telemetry.ExecutionID(ctx)}, grpc.WaitForReady(true))
 	if err != nil {
 		return nil, classifyRPCError(err)
 	}

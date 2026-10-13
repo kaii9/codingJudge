@@ -56,6 +56,7 @@ func (b *limitedBuffer) Truncated() bool {
 }
 
 type DockerRunner struct {
+	owner       string
 	image       string
 	workDirRoot string
 	metrics     SandboxMetrics
@@ -126,8 +127,11 @@ func (r *DockerRunner) RunBatch(ctx context.Context, req RunRequest, inputs []st
 		return nil, err
 	}
 	defer os.RemoveAll(workdir)
+	if err := os.Chmod(workdir, 0o755); err != nil {
+		return nil, err
+	}
 
-	if err := os.WriteFile(filepath.Join(workdir, spec.filename), []byte(req.Code), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(workdir, spec.filename), []byte(req.Code), 0o644); err != nil {
 		return nil, err
 	}
 
@@ -140,7 +144,7 @@ func (r *DockerRunner) RunBatch(ctx context.Context, req RunRequest, inputs []st
 		}
 		compileCtx, cancelCompile := context.WithTimeout(ctx, compileTimeout)
 		started := time.Now()
-		compileResult, err := executeDocker(compileCtx, compileArgs)
+		compileResult, err := executeDocker(compileCtx, r.ownedArgs(compileArgs))
 		cancelCompile()
 		r.observeSandbox(req.Language, StageCompile, compileResult, err, time.Since(started))
 		if ctx.Err() != nil {
@@ -161,7 +165,7 @@ func (r *DockerRunner) RunBatch(ctx context.Context, req RunRequest, inputs []st
 
 	results := make([]RunResult, 0, len(inputs))
 	for _, input := range inputs {
-		if err := os.WriteFile(filepath.Join(workdir, "input.txt"), []byte(input), 0o600); err != nil {
+		if err := os.WriteFile(filepath.Join(workdir, "input.txt"), []byte(input), 0o644); err != nil {
 			return nil, err
 		}
 		result, err := r.runPrepared(ctx, req, workdir)
@@ -181,15 +185,13 @@ func (r *DockerRunner) runPrepared(ctx context.Context, req RunRequest, workdir 
 	if runLimit <= 0 {
 		runLimit = time.Second
 	}
-	runCtx, cancel := context.WithTimeout(ctx, runLimit+500*time.Millisecond)
-	defer cancel()
 
 	args := dockerRunArgs(req, workdir)
 	if r.image != "" {
 		args = replaceImage(args, r.image)
 	}
 	started := time.Now()
-	result, err := executeDocker(runCtx, args)
+	result, err := executeTimedSandbox(ctx, r.ownedArgs(args), runLimit)
 	result.Stage = StageRun
 	r.observeSandbox(req.Language, StageRun, result, err, time.Since(started))
 	if ctx.Err() != nil {
@@ -280,15 +282,25 @@ func dockerArgsWithName(args []string, name string) ([]string, error) {
 }
 
 func forceRemoveContainer(ctx context.Context, name string) error {
-	output, err := exec.CommandContext(ctx, "docker", "rm", "-f", name).CombinedOutput()
-	if err == nil || strings.Contains(strings.ToLower(string(output)), "no such container") {
-		return nil
+	for {
+		output, err := exec.CommandContext(ctx, "docker", "rm", "-f", name).CombinedOutput()
+		if err == nil || strings.Contains(strings.ToLower(string(output)), "no such container") {
+			return nil
+		}
+		message := strings.TrimSpace(string(output))
+		if strings.Contains(strings.ToLower(message), "already in progress") {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(50 * time.Millisecond):
+				continue
+			}
+		}
+		if message == "" {
+			return err
+		}
+		return fmt.Errorf("%w: %s", err, message)
 	}
-	message := strings.TrimSpace(string(output))
-	if message == "" {
-		return err
-	}
-	return fmt.Errorf("%w: %s", err, message)
 }
 
 func newContainerName() (string, error) {

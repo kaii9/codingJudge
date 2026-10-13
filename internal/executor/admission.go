@@ -83,12 +83,7 @@ func (a *admission) acquire(ctx context.Context) (context.Context, func(), error
 	return workCtx, func() { stop(); cancel(); <-a.slots; a.active.Done() }, nil
 }
 func (a *admission) drain(ctx context.Context) error {
-	a.mu.Lock()
-	if !a.draining {
-		a.draining = true
-		close(a.done)
-	}
-	a.mu.Unlock()
+	a.beginDrain()
 	done := make(chan struct{})
 	go func() { a.active.Wait(); close(done) }()
 	select {
@@ -98,4 +93,12 @@ func (a *admission) drain(ctx context.Context) error {
 		a.cancel()
 		return ctx.Err()
 	}
+}
+func (a *admission) beginDrain() {
+	a.mu.Lock()
+	if !a.draining {
+		a.draining = true
+		close(a.done)
+	}
+	a.mu.Unlock()
 }

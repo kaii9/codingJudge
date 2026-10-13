@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"github.com/jackc/pgx/v5"
 	"github.com/kaii9/codingJudge/internal/domain"
+	"github.com/kaii9/codingJudge/internal/telemetry"
 	"time"
 )
 
@@ -34,7 +35,7 @@ func (s *PostgresStore) completeWithEvent(ctx context.Context, id, token string,
 	if err != nil {
 		return false, err
 	}
-	if _, err := tx.Exec(ctx, "INSERT INTO completion_outbox(event_id,submission_id,payload) VALUES($1,$2,$3)", event.ID, id, data); err != nil {
+	if _, err := tx.Exec(ctx, "INSERT INTO completion_outbox(event_id,submission_id,payload,trace_parent) VALUES($1,$2,$3,$4)", event.ID, id, data, telemetry.TraceParent(ctx)); err != nil {
 		return false, err
 	}
 	return true, tx.Commit(ctx)
@@ -48,7 +49,7 @@ func (o CompletionOutbox) ClaimOutbox(ctx context.Context, owner string, now tim
  SELECT id FROM completion_outbox WHERE published_at IS NULL AND next_attempt_at<=$1
  AND (claimed_by IS NULL OR claim_expires_at<=$1) ORDER BY id FOR UPDATE SKIP LOCKED LIMIT $2)
  UPDATE completion_outbox o SET claimed_by=$3,claim_expires_at=$4,publish_attempts=publish_attempts+1
- FROM candidates c WHERE o.id=c.id RETURNING o.id,o.submission_id,o.claimed_by,o.publish_attempts,o.payload::text
+	 FROM candidates c WHERE o.id=c.id RETURNING o.id,o.submission_id,o.claimed_by,o.publish_attempts,o.payload::text,o.trace_parent
  `, now, limit, owner, now.Add(duration))
 	if err != nil {
 		return nil, err
@@ -57,7 +58,7 @@ func (o CompletionOutbox) ClaimOutbox(ctx context.Context, owner string, now tim
 	out := []domain.OutboxEvent{}
 	for rows.Next() {
 		var event domain.OutboxEvent
-		if err := rows.Scan(&event.ID, &event.SubmissionID, &event.ClaimToken, &event.PublishAttempts, &event.Payload); err != nil {
+		if err := rows.Scan(&event.ID, &event.SubmissionID, &event.ClaimToken, &event.PublishAttempts, &event.Payload, &event.TraceParent); err != nil {
 			return nil, err
 		}
 		out = append(out, event)

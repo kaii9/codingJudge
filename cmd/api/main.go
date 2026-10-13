@@ -21,7 +21,9 @@ import (
 	"github.com/kaii9/codingJudge/internal/problems"
 	"github.com/kaii9/codingJudge/internal/queue"
 	"github.com/kaii9/codingJudge/internal/ratelimit"
+	"github.com/kaii9/codingJudge/internal/rpcsecurity"
 	"github.com/kaii9/codingJudge/internal/store"
+	"github.com/kaii9/codingJudge/internal/telemetry"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/collectors"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -36,6 +38,12 @@ func main() {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	shutdownTracing, err := telemetry.Init("gojudge-platform")
+	if err != nil {
+		slog.Error("tracing setup failed", "error", err)
+		os.Exit(1)
+	}
+	defer shutdownTracing()
 
 	st, cleanupStore, err := buildStore(ctx, cfg)
 	if err != nil {
@@ -46,7 +54,12 @@ func main() {
 	var apiStore httpapi.ProblemStore = st
 	var remoteJudge *judgerpc.Client
 	if endpoint := os.Getenv("JUDGE_SERVICE_ADDR"); endpoint != "" {
-		remoteJudge, err = judgerpc.NewClient(endpoint, os.Getenv("JUDGE_SERVICE_TOKEN"), 5*time.Second)
+		rpcOptions, tlsErr := rpcsecurity.ClientOptions(os.Getenv)
+		if tlsErr != nil {
+			slog.Error("RPC TLS setup failed", "error", tlsErr)
+			os.Exit(1)
+		}
+		remoteJudge, err = judgerpc.NewClient(endpoint, os.Getenv("JUDGE_SERVICE_TOKEN"), 5*time.Second, rpcOptions...)
 		if err != nil {
 			slog.Error("judge client setup failed", "error", err)
 			os.Exit(1)
@@ -142,7 +155,7 @@ func main() {
 
 	server := &http.Server{
 		Addr:              cfg.APIAddr,
-		Handler:           httpapi.AccessLog(httpapi.NewServer(apiStore, options...), slog.Default()),
+		Handler:           telemetry.HTTP(httpapi.AccessLog(httpapi.NewServer(apiStore, options...), slog.Default())),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       10 * time.Second,
 		WriteTimeout:      15 * time.Second,

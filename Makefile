@@ -1,4 +1,5 @@
 GOCACHE_DIR := $(CURDIR)/.cache/go-build
+MICROSERVICES_COMPOSE := docker compose -f deploy/compose/microservices.yml
 MULTINODE_COMPOSE := docker compose -f docker-compose.yml -f deploy/compose/multinode.yml
 
 JUDGE_IMAGES := golang:1.25-alpine python:3.12-alpine gcc:13
@@ -8,6 +9,23 @@ JUDGE_IMAGES := golang:1.25-alpine python:3.12-alpine gcc:13
 test:
 	mkdir -p $(GOCACHE_DIR)
 	GOCACHE=$(GOCACHE_DIR) go test ./...
+
+.PHONY: proto microservices-build microservices-up microservices-down verify-microservices
+proto:
+	PATH="$$(go env GOPATH)/bin:$$PATH" protoc -I api/proto --go_out=. --go_opt=module=github.com/kaii9/codingJudge --go-grpc_out=. --go-grpc_opt=module=github.com/kaii9/codingJudge api/proto/gojudge/executor/v1/executor.proto api/proto/gojudge/judge/v1/judge.proto
+	PATH="$$(go env GOPATH)/bin:$$PATH" protoc -I api/compat/executor --go_out=. --go_opt=module=github.com/kaii9/codingJudge api/compat/executor/executor-v1.proto
+
+microservices-build:
+	@set -e; for service in platform judge-api worker executor migrate-platform; do $(MICROSERVICES_COMPOSE) build $$service; done
+
+microservices-up: microservices-build
+	$(MICROSERVICES_COMPOSE) up -d --no-build --wait
+
+microservices-down:
+	$(MICROSERVICES_COMPOSE) down
+
+verify-microservices:
+	bash scripts/verify-microservices.sh
 
 frontend-deps:
 	rm -rf frontend/node_modules

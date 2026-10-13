@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -10,7 +11,11 @@ import (
 )
 
 func (s *PostgresStore) ClaimOutbox(ctx context.Context, owner string, now time.Time, claimDuration time.Duration, limit int) ([]domain.OutboxEvent, error) {
-	rows, err := s.pool.Query(ctx, `
+	traceColumn := "''::text"
+	if s.judgeDomain {
+		traceColumn = "outbox.trace_parent"
+	}
+	rows, err := s.pool.Query(ctx, fmt.Sprintf(`
 		WITH candidates AS (
 			SELECT id
 			FROM judge_outbox
@@ -27,8 +32,8 @@ func (s *PostgresStore) ClaimOutbox(ctx context.Context, owner string, now time.
 		    publish_attempts = publish_attempts + 1
 		FROM candidates
 		WHERE outbox.id = candidates.id
-		RETURNING outbox.id, outbox.submission_id, outbox.claimed_by, outbox.publish_attempts
-	`, now, limit, owner, now.Add(claimDuration))
+		RETURNING outbox.id, outbox.submission_id, outbox.claimed_by, outbox.publish_attempts, %s
+	`, traceColumn), now, limit, owner, now.Add(claimDuration))
 	if err != nil {
 		return nil, err
 	}
@@ -36,7 +41,7 @@ func (s *PostgresStore) ClaimOutbox(ctx context.Context, owner string, now time.
 	events := make([]domain.OutboxEvent, 0, limit)
 	for rows.Next() {
 		var event domain.OutboxEvent
-		if err := rows.Scan(&event.ID, &event.SubmissionID, &event.ClaimToken, &event.PublishAttempts); err != nil {
+		if err := rows.Scan(&event.ID, &event.SubmissionID, &event.ClaimToken, &event.PublishAttempts, &event.TraceParent); err != nil {
 			return nil, err
 		}
 		events = append(events, event)

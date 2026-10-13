@@ -69,3 +69,14 @@ func TestDrainDeadlineCancelsInFlight(t *testing.T) {
 		t.Fatal("in-flight work not canceled")
 	}
 }
+
+func TestDrainCannotBeReactivatedByHealthProbe(t *testing.T) {
+	core, _, _ := grpcFixture(t, runnerFunc(func(context.Context, judge.RunRequest, []string) ([]judge.RunResult, error) { return nil, nil }))
+	if err := core.Drain(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	core.SetServing(true)
+	if core.serving.Load() {
+		t.Fatal("health probe revived draining executor")
+	}
+}

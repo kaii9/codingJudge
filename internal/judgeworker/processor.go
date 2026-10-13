@@ -13,6 +13,7 @@ import (
 	"github.com/kaii9/codingJudge/internal/domain"
 	judgepkg "github.com/kaii9/codingJudge/internal/judge"
 	"github.com/kaii9/codingJudge/internal/store"
+	"github.com/kaii9/codingJudge/internal/telemetry"
 )
 
 var (
@@ -52,6 +53,7 @@ type Config struct {
 	LeaseDuration     time.Duration
 	HeartbeatInterval time.Duration
 	MaxAttempts       int
+	TaskTimeout       time.Duration
 	Now               func() time.Time
 	Token             func() (string, error)
 	ArtifactStore     ObjectStore
@@ -76,6 +78,9 @@ func NewProcessor(st store.LeaseStore, queue WorkerQueue, judge Judge, config Co
 	}
 	if config.MaxAttempts <= 0 {
 		config.MaxAttempts = 3
+	}
+	if config.TaskTimeout <= 0 {
+		config.TaskTimeout = 3 * time.Minute
 	}
 	if config.Now == nil {
 		config.Now = func() time.Time { return time.Now().UTC() }
@@ -118,6 +123,10 @@ func (p *Processor) ProcessOne(ctx context.Context) error {
 }
 
 func (p *Processor) ProcessJob(ctx context.Context, job domain.Job) error {
+	ctx, cancelTask := context.WithTimeout(ctx, p.config.TaskTimeout)
+	defer cancelTask()
+	ctx, span := telemetry.Start(telemetry.Extract(ctx, job.TraceParent), "judge.process")
+	defer span.End()
 	started := p.config.Now()
 	token, err := p.config.Token()
 	if err != nil {
@@ -141,6 +150,7 @@ func (p *Processor) ProcessJob(ctx context.Context, job domain.Job) error {
 		}
 		return nil
 	case domain.ClaimAcquired:
+		ctx = telemetry.WithExecutionID(ctx, fmt.Sprintf("%s:attempt-%d", job.SubmissionID, claim.Attempts))
 		if p.metrics != nil {
 			p.metrics.WorkerJobStarted()
 			if claim.LeaseTakeover {
@@ -160,6 +170,27 @@ func (p *Processor) ProcessJob(ctx context.Context, job domain.Job) error {
 }
 
 func (p *Processor) processClaim(ctx context.Context, job domain.Job, claim domain.SubmissionClaim) (domain.JudgeResult, error) {
+	workCtx, cancel := context.WithCancel(ctx)
+	done := make(chan struct{})
+	heartbeatResult := make(chan error, 1)
+	go func() {
+		err := p.heartbeat(workCtx, done, job, claim)
+		if err != nil {
+			cancel()
+		}
+		heartbeatResult <- err
+	}()
+	result, err := p.processClaimWork(workCtx, job, claim)
+	close(done)
+	cancel()
+	heartbeatErr := <-heartbeatResult
+	if heartbeatErr != nil && result.Status == "" && !errors.Is(err, errRetry) && !errors.Is(err, errDeadLetter) {
+		return domain.JudgeResult{}, heartbeatErr
+	}
+	return result, err
+}
+
+func (p *Processor) processClaimWork(ctx context.Context, job domain.Job, claim domain.SubmissionClaim) (domain.JudgeResult, error) {
 	var problem domain.Problem
 	var ok bool
 	var err error
@@ -185,7 +216,7 @@ func (p *Processor) processClaim(ctx context.Context, job domain.Job, claim doma
 		return result, p.queue.Ack(ctx, job)
 	}
 
-	result, err := p.evaluateWithHeartbeat(ctx, job, claim, problem)
+	result, err := p.evaluate(ctx, claim, problem)
 	if err != nil {
 		if errors.Is(err, ErrLeaseLost) {
 			return domain.JudgeResult{}, err
@@ -203,35 +234,19 @@ func (p *Processor) processClaim(ctx context.Context, job domain.Job, claim doma
 		return domain.JudgeResult{}, ErrLeaseLost
 	}
 	if err := p.queue.Ack(ctx, job); err != nil {
-		return domain.JudgeResult{}, fmt.Errorf("acknowledge completed submission: %w", err)
+		return result, fmt.Errorf("acknowledge completed submission: %w", err)
 	}
 	return result, nil
 }
 
-func (p *Processor) evaluateWithHeartbeat(ctx context.Context, job domain.Job, claim domain.SubmissionClaim, problem domain.Problem) (domain.JudgeResult, error) {
-	judgeCtx, cancel := context.WithCancel(ctx)
-	done := make(chan struct{})
-	heartbeatResult := make(chan error, 1)
-	go func() {
-		err := p.heartbeat(judgeCtx, done, job, claim)
-		if err != nil {
-			cancel()
-		}
-		heartbeatResult <- err
-	}()
-	resolvedProblem, resolveErr := judgepkg.ResolveProblemTestCaseAssets(judgeCtx, problem, p.objects)
+func (p *Processor) evaluate(ctx context.Context, claim domain.SubmissionClaim, problem domain.Problem) (domain.JudgeResult, error) {
+	resolvedProblem, resolveErr := judgepkg.ResolveProblemTestCaseAssets(ctx, problem, p.objects)
 	var result domain.JudgeResult
 	var evaluateErr error
 	if resolveErr != nil {
 		evaluateErr = resolveErr
 	} else {
-		result, evaluateErr = p.judge.Evaluate(judgeCtx, resolvedProblem, claim.Submission.Language, claim.Submission.Code)
-	}
-	close(done)
-	cancel()
-	heartbeatErr := <-heartbeatResult
-	if heartbeatErr != nil {
-		return domain.JudgeResult{}, heartbeatErr
+		result, evaluateErr = p.judge.Evaluate(ctx, resolvedProblem, claim.Submission.Language, claim.Submission.Code)
 	}
 	if evaluateErr != nil {
 		return domain.JudgeResult{}, fmt.Errorf("judge submission: %w", evaluateErr)
@@ -304,6 +319,9 @@ func (p *Processor) heartbeat(ctx context.Context, done <-chan struct{}, job dom
 		case <-ticker.C:
 			renewed, err := p.store.RenewSubmissionLease(ctx, claim.Submission.ID, claim.Token, p.config.Now(), p.config.LeaseDuration)
 			if err != nil {
+				if ctx.Err() != nil {
+					return nil
+				}
 				return fmt.Errorf("renew judge lease: %w", err)
 			}
 			if !renewed {

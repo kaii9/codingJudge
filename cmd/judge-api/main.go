@@ -9,7 +9,9 @@ import (
 	"github.com/kaii9/codingJudge/internal/outbox"
 	"github.com/kaii9/codingJudge/internal/platform"
 	"github.com/kaii9/codingJudge/internal/queue"
+	"github.com/kaii9/codingJudge/internal/rpcsecurity"
 	"github.com/kaii9/codingJudge/internal/store"
+	"github.com/kaii9/codingJudge/internal/telemetry"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/redis/go-redis/v9"
@@ -31,6 +33,11 @@ func main() {
 	}
 }
 func run(ctx context.Context) error {
+	shutdownTracing, err := telemetry.Init("gojudge-judge-api")
+	if err != nil {
+		return err
+	}
+	defer shutdownTracing()
 	token := os.Getenv("JUDGE_SERVICE_TOKEN")
 	dsn := os.Getenv("DATABASE_URL")
 	redisAddr := os.Getenv("REDIS_ADDR")
@@ -59,7 +66,11 @@ func run(ctx context.Context) error {
 	completionPublisher := queue.NewRedisStreamsQueue(redisClient, platform.CompletionStream, platform.CompletionGroup, "completion-relay", queue.WithMetrics(app))
 	completionRelay := outbox.New(store.CompletionOutbox{Store: st}, completionPublisher, outbox.Config{RelayID: "completion-" + os.Getenv("HOSTNAME"), Metrics: app})
 	go func() { _ = completionRelay.Run(ctx) }()
-	rpc := judgerpc.NewServer(st, objects, token)
+	rpcOptions, err := rpcsecurity.ServerOptions(os.Getenv)
+	if err != nil {
+		return err
+	}
+	rpc := judgerpc.NewServer(st, objects, token, rpcOptions...)
 	addr := os.Getenv("JUDGE_GRPC_ADDR")
 	if addr == "" {
 		addr = ":8092"

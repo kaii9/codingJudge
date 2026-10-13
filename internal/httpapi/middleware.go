@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/kaii9/codingJudge/internal/telemetry"
 )
 
 func AccessLog(next http.Handler, logger *slog.Logger) http.Handler {
@@ -17,6 +18,7 @@ func AccessLog(next http.Handler, logger *slog.Logger) http.Handler {
 		started := time.Now()
 		next.ServeHTTP(rec, r)
 		logger.Info("http request",
+			"traceparent", telemetry.TraceParent(r.Context()),
 			"method", r.Method,
 			"path", r.URL.Path,
 			"status", rec.status,

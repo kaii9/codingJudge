@@ -7,6 +7,7 @@ import (
 	pb "github.com/kaii9/codingJudge/api/gen/judge/v1"
 	"github.com/kaii9/codingJudge/internal/domain"
 	"github.com/kaii9/codingJudge/internal/store"
+	"github.com/kaii9/codingJudge/internal/telemetry"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/health"
@@ -42,7 +43,7 @@ func NewServer(st Backend, objects ObjectGetter, token string, options ...grpc.S
 		}
 		return handler(ctx, req)
 	}
-	options = append(options, grpc.ChainUnaryInterceptor(auth), grpc.MaxRecvMsgSize(16<<20), grpc.MaxSendMsgSize(32<<20))
+	options = append(options, grpc.ChainUnaryInterceptor(auth, telemetry.ServerUnary), grpc.MaxRecvMsgSize(16<<20), grpc.MaxSendMsgSize(32<<20))
 	server := grpc.NewServer(options...)
 	pb.RegisterJudgeServiceServer(server, &service{store: st, objects: objects})
 	checker := health.NewServer()

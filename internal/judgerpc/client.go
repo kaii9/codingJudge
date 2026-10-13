@@ -8,6 +8,7 @@ import (
 	pb "github.com/kaii9/codingJudge/api/gen/judge/v1"
 	"github.com/kaii9/codingJudge/internal/domain"
 	"github.com/kaii9/codingJudge/internal/store"
+	"github.com/kaii9/codingJudge/internal/telemetry"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
@@ -28,6 +29,7 @@ func NewClient(endpoint, token string, timeout time.Duration, options ...grpc.Di
 		return nil, fmt.Errorf("judge endpoint, token and timeout required")
 	}
 	opts := []grpc.DialOption{grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithDisableRetry(), grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(32<<20), grpc.MaxCallSendMsgSize(16<<20))}
+	opts = append(opts, grpc.WithChainUnaryInterceptor(telemetry.ClientUnary))
 	opts = append(opts, options...)
 	conn, err := grpc.NewClient(endpoint, opts...)
 	if err != nil {

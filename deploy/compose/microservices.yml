@@ -1,0 +1,160 @@
+name: gojudge-microservices
+x-judge-env: &judge-env
+  DATABASE_URL: postgres://cj_judge:cj-judge-local-only@postgres:5432/cj_judge?sslmode=disable
+  REDIS_ADDR: redis:6379
+  JUDGE_SERVICE_TOKEN: ${JUDGE_SERVICE_TOKEN:-gojudge-local-judge-token}
+  MINIO_ENDPOINT: minio:9000
+  MINIO_ACCESS_KEY: minioadmin
+  MINIO_SECRET_KEY: minioadmin
+  MINIO_BUCKET: codingjudge-assets
+  JUDGE_DOMAIN: "true"
+x-executor: &executor
+  image: gojudge-microservices-executor:latest
+  build:
+    context: ../..
+    dockerfile: deploy/Dockerfile.microservices
+    target: executor
+  environment: &executor-env
+    EXECUTOR_TOKEN: ${EXECUTOR_TOKEN:-gojudge-local-executor-token}
+    EXECUTOR_MAX_CONCURRENCY: "1"
+    EXECUTOR_MAX_WAITERS: "4"
+    EXECUTOR_SHUTDOWN_GRACE: 30s
+    JUDGE_WORKDIR: /tmp/gojudge-microservices-sandbox
+  volumes:
+    - /var/run/docker.sock:/var/run/docker.sock
+    - /tmp/gojudge-microservices-sandbox:/tmp/gojudge-microservices-sandbox
+  healthcheck:
+    test: ["CMD","wget","-q","--spider","http://localhost:8090/readyz"]
+    interval: 3s
+    timeout: 3s
+    retries: 30
+  stop_grace_period: 40s
+  read_only: true
+  tmpfs: [/tmp]
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: gojudge-bootstrap-local-only
+    ports: ["${CJ_MICRO_PG_PORT:-25432}:5432"]
+    volumes:
+      - micro-postgres:/var/lib/postgresql/data
+      - ../db/microservices-init.sql:/docker-entrypoint-initdb.d/001_domains.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL","pg_isready -U postgres"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+  redis:
+    image: redis:7-alpine
+    ports: ["${CJ_MICRO_REDIS_PORT:-36379}:6379"]
+    command: ["redis-server","--appendonly","yes"]
+    volumes: [micro-redis:/data]
+    healthcheck:
+      test: ["CMD","redis-cli","ping"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+  minio:
+    image: minio/minio:RELEASE.2025-04-22T22-12-26Z
+    command: ["server","/data","--console-address",":9001"]
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    ports: ["${CJ_MICRO_MINIO_PORT:-29000}:9000"]
+    volumes: [micro-minio:/data]
+    healthcheck:
+      test: ["CMD","mc","ready","local"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+  migrate-platform:
+    image: gojudge-microservices-migrate:latest
+    build: {context: ../.., dockerfile: deploy/Dockerfile.microservices, target: migrate}
+    command: ["-dir","/app/migrations/platform"]
+    environment:
+      DATABASE_URL: postgres://cj_platform:cj-platform-local-only@postgres:5432/cj_platform?sslmode=disable
+    depends_on:
+      postgres: {condition: service_healthy}
+  migrate-judge:
+    image: gojudge-microservices-migrate:latest
+    build: {context: ../.., dockerfile: deploy/Dockerfile.microservices, target: migrate}
+    command: ["-dir","/app/migrations/judge"]
+    environment: *judge-env
+    depends_on:
+      postgres: {condition: service_healthy}
+  judge-api:
+    build: {context: ../.., dockerfile: deploy/Dockerfile.microservices, target: judge-api}
+    environment: *judge-env
+    depends_on:
+      migrate-judge: {condition: service_completed_successfully}
+      redis: {condition: service_healthy}
+      minio: {condition: service_healthy}
+    healthcheck:
+      test: ["CMD","wget","-q","--spider","http://localhost:9092/readyz"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+  platform:
+    build: {context: ../.., dockerfile: deploy/Dockerfile.microservices, target: platform}
+    environment:
+      DATABASE_URL: postgres://cj_platform:cj-platform-local-only@postgres:5432/cj_platform?sslmode=disable
+      REDIS_ADDR: redis:6379
+      JUDGE_SERVICE_ADDR: judge-api:8092
+      JUDGE_SERVICE_TOKEN: ${JUDGE_SERVICE_TOKEN:-gojudge-local-judge-token}
+      COOKIE_SECURE: "false"
+      SUBMISSION_RATE_LIMIT_PER_MINUTE: "100"
+      SUBMISSION_RATE_LIMIT_BURST: "20"
+    ports: ["${CJ_MICRO_API_PORT:-28080}:8080"]
+    depends_on:
+      migrate-platform: {condition: service_completed_successfully}
+      judge-api: {condition: service_healthy}
+      redis: {condition: service_healthy}
+    healthcheck:
+      test: ["CMD","wget","-q","--spider","http://localhost:8080/readyz"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+  executor:
+    <<: *executor
+    environment:
+      <<: *executor-env
+      EXECUTOR_INSTANCE_ID: gojudge-microservices-executor-a
+  executor-b:
+    <<: *executor
+    environment:
+      <<: *executor-env
+      EXECUTOR_INSTANCE_ID: gojudge-microservices-executor-b
+  worker:
+    build: {context: ../.., dockerfile: deploy/Dockerfile.microservices, target: worker}
+    environment:
+      <<: *judge-env
+      WORKER_CONCURRENCY: "2"
+      WORKER_SHUTDOWN_GRACE: 30s
+      EXECUTOR_PROTOCOL: grpc
+      EXECUTOR_URLS: http://executor:8091,http://executor-b:8091
+      EXECUTOR_TOKEN: ${EXECUTOR_TOKEN:-gojudge-local-executor-token}
+      EXECUTOR_TIMEOUT: 120s
+    depends_on:
+      migrate-judge: {condition: service_completed_successfully}
+      redis: {condition: service_healthy}
+      minio: {condition: service_healthy}
+      executor: {condition: service_healthy}
+      executor-b: {condition: service_healthy}
+    stop_grace_period: 40s
+  frontend:
+    profiles: [frontend]
+    build: {context: ../../frontend}
+    environment:
+      API_INTERNAL_URL: http://platform:8080
+      HOSTNAME: 0.0.0.0
+      PORT: "3000"
+    ports: ["${CJ_MICRO_FRONTEND_PORT:-23000}:3000"]
+    depends_on:
+      platform: {condition: service_healthy}
+volumes:
+  micro-postgres:
+  micro-redis:
+  micro-minio:
+

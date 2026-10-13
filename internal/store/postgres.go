@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/kaii9/codingJudge/internal/domain"
+	"github.com/kaii9/codingJudge/internal/telemetry"
 )
 
 type PostgresStore struct {
@@ -287,11 +288,14 @@ func (s *PostgresStore) createSubmission(ctx context.Context, sub domain.Submiss
 		}
 		return existing, true, nil
 	}
-	if _, err = tx.Exec(ctx, `
-		INSERT INTO judge_outbox (submission_id)
-		VALUES ($1)
-	`, sub.ID); err != nil {
-		return domain.Submission{}, false, err
+	var outboxErr error
+	if s.judgeDomain {
+		_, outboxErr = tx.Exec(ctx, "INSERT INTO judge_outbox(submission_id,trace_parent) VALUES($1,$2)", sub.ID, telemetry.TraceParent(ctx))
+	} else {
+		_, outboxErr = tx.Exec(ctx, "INSERT INTO judge_outbox(submission_id) VALUES($1)", sub.ID)
+	}
+	if outboxErr != nil {
+		return domain.Submission{}, false, outboxErr
 	}
 	if snapshot != nil {
 		data, marshalErr := json.Marshal(snapshot)

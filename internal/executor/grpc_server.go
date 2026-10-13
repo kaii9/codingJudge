@@ -7,6 +7,7 @@ import (
 
 	pb "github.com/kaii9/codingJudge/api/gen/executor/v1"
 	"github.com/kaii9/codingJudge/internal/domain"
+	"github.com/kaii9/codingJudge/internal/telemetry"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/health"
@@ -21,7 +22,7 @@ type grpcExecutor struct {
 }
 
 func NewGRPCServer(core *Server, options ...grpc.ServerOption) *grpc.Server {
-	options = append(options, grpc.MaxRecvMsgSize(maxRequestBytes), grpc.MaxSendMsgSize(maxResponseBytes))
+	options = append(options, grpc.ChainUnaryInterceptor(telemetry.ServerUnary), grpc.MaxRecvMsgSize(maxRequestBytes), grpc.MaxSendMsgSize(maxResponseBytes))
 	server := grpc.NewServer(options...)
 	pb.RegisterExecutorServiceServer(server, &grpcExecutor{core: core})
 	core.health = health.NewServer()
@@ -30,6 +31,11 @@ func NewGRPCServer(core *Server, options ...grpc.ServerOption) *grpc.Server {
 	return server
 }
 func (s *Server) SetServing(serving bool) {
+	s.admission.mu.Lock()
+	defer s.admission.mu.Unlock()
+	if s.admission.draining {
+		serving = false
+	}
 	s.serving.Store(serving)
 	if s.health != nil {
 		state := healthpb.HealthCheckResponse_NOT_SERVING
@@ -40,7 +46,11 @@ func (s *Server) SetServing(serving bool) {
 		s.health.SetServingStatus(pb.ExecutorService_ServiceDesc.ServiceName, state)
 	}
 }
-func (s *Server) Drain(ctx context.Context) error { s.SetServing(false); return s.admission.drain(ctx) }
+func (s *Server) Drain(ctx context.Context) error {
+	s.admission.beginDrain()
+	s.SetServing(false)
+	return s.admission.drain(ctx)
+}
 func (s *grpcExecutor) RunBatch(ctx context.Context, req *pb.RunBatchRequest) (*pb.RunBatchResponse, error) {
 	md, _ := metadata.FromIncomingContext(ctx)
 	auth := md.Get("authorization")
