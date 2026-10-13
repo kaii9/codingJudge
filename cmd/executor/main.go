@@ -4,11 +4,9 @@ import (
 	"context"
 	"errors"
 	"log/slog"
-	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
-	"time"
 
 	"github.com/kaii9/codingJudge/internal/config"
 	"github.com/kaii9/codingJudge/internal/executor"
@@ -40,29 +38,15 @@ func main() {
 		promhttp.HandlerFor(registry, promhttp.HandlerOpts{}),
 		runner.Ping,
 		executor.WithPrometheusMetrics(registry, cfg.MaxConcurrency),
+		executor.WithAdmission(cfg.MaxWaiters, cfg.WaitTimeout),
 	)
 	if err != nil {
 		slog.Error("executor setup failed", "error", err)
 		os.Exit(1)
 	}
 
-	server := &http.Server{
-		Addr:              cfg.Addr,
-		Handler:           executorServer.Handler(),
-		ReadHeaderTimeout: 5 * time.Second,
-		ReadTimeout:       15 * time.Second,
-		IdleTimeout:       60 * time.Second,
-		MaxHeaderBytes:    16 << 10,
-	}
-	go func() {
-		<-ctx.Done()
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), cfg.ShutdownGrace)
-		defer cancel()
-		_ = server.Shutdown(shutdownCtx)
-	}()
-
-	slog.Info("executor listening", "addr", cfg.Addr, "max_concurrency", cfg.MaxConcurrency)
-	if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+	slog.Info("executor listening", "addr", cfg.Addr, "grpc_addr", cfg.GRPCAddr, "max_concurrency", cfg.MaxConcurrency)
+	if err := executor.Serve(ctx, cfg.Addr, cfg.GRPCAddr, executorServer, cfg.ShutdownGrace); err != nil && !errors.Is(err, context.Canceled) {
 		slog.Error("executor stopped", "error", err)
 		os.Exit(1)
 	}

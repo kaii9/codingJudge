@@ -8,6 +8,13 @@ import (
 	"github.com/kaii9/codingJudge/internal/config"
 )
 
+func TestLoadRejectsUnknownExecutorProtocol(t *testing.T) {
+	values := map[string]string{"DATABASE_URL": "postgres://db", "REDIS_ADDR": "redis:6379", "EXECUTOR_PROTOCOL": "unknown"}
+	if _, err := config.LoadWorker(func(k string) string { return values[k] }); err == nil {
+		t.Fatal("unsupported executor protocol accepted")
+	}
+}
+
 func TestLoadUsesMemoryDefaults(t *testing.T) {
 	t.Parallel()
 

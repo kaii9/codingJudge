@@ -308,7 +308,9 @@ func (p *Processor) heartbeat(ctx context.Context, done <-chan struct{}, job dom
 }
 
 func (p *Processor) handleInfrastructureError(ctx context.Context, job domain.Job, claim domain.SubmissionClaim, cause error) error {
-	if claim.Attempts >= p.config.MaxAttempts {
+	var classified interface{ Retryable() bool }
+	permanent := errors.As(cause, &classified) && !classified.Retryable()
+	if claim.Attempts >= p.config.MaxAttempts || permanent {
 		result := domain.JudgeResult{Status: domain.StatusInternalError, Stderr: cause.Error()}
 		completed, err := p.store.CompleteSubmission(ctx, claim.Submission.ID, claim.Token, p.config.Now(), result)
 		if err != nil {

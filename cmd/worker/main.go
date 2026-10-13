@@ -75,7 +75,16 @@ func main() {
 
 	var runner judge.Runner
 	if len(cfg.ExecutorURLs) > 0 {
-		runner, err = executor.NewClientPool(cfg.ExecutorURLs, cfg.ExecutorToken, cfg.ExecutorTimeout)
+		if cfg.ExecutorProtocol == "grpc" {
+			var rpcPool *executor.GRPCClientPool
+			rpcPool, err = executor.NewGRPCClientPool(cfg.ExecutorURLs, cfg.ExecutorToken, cfg.ExecutorTimeout)
+			if err == nil {
+				runner = rpcPool
+				defer rpcPool.Close()
+			}
+		} else {
+			runner, err = executor.NewClientPool(cfg.ExecutorURLs, cfg.ExecutorToken, cfg.ExecutorTimeout)
+		}
 		if err != nil {
 			slog.Error("remote executor setup failed", "error", err)
 			os.Exit(1)

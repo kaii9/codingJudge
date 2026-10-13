@@ -5,9 +5,11 @@ import (
 	"crypto/subtle"
 	"encoding/json"
 	"errors"
+	"google.golang.org/grpc/health"
 	"io"
 	"log/slog"
 	"net/http"
+	"sync/atomic"
 	"time"
 
 	"github.com/kaii9/codingJudge/internal/judge"
@@ -22,6 +24,9 @@ type Server struct {
 	metrics          http.Handler
 	executionMetrics executionMetrics
 	readiness        ReadinessCheck
+	admission        *admission
+	serving          atomic.Bool
+	health           *health.Server
 }
 
 type ServerOption func(*Server)
@@ -37,6 +42,8 @@ func NewServer(runner judge.BatchRunner, token string, maxConcurrency int, metri
 		return nil, errors.New("executor max concurrency must be positive")
 	}
 	server := &Server{runner: runner, token: token, slots: make(chan struct{}, maxConcurrency), metrics: metrics, readiness: readiness}
+	server.admission = newAdmission(maxConcurrency, maxConcurrency*2, 5*time.Second)
+	server.serving.Store(true)
 	for _, option := range options {
 		option(server)
 	}
@@ -57,6 +64,10 @@ func (s *Server) Handler() http.Handler {
 }
 
 func (s *Server) ready(w http.ResponseWriter, r *http.Request) {
+	if !s.serving.Load() {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"status": "not_ready"})
+		return
+	}
 	if s.readiness != nil {
 		ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
 		defer cancel()
@@ -96,18 +107,18 @@ func (s *Server) runBatch(w http.ResponseWriter, r *http.Request) {
 	}
 
 	waitStarted := time.Now()
-	select {
-	case s.slots <- struct{}{}:
-		defer func() { <-s.slots }()
-	case <-r.Context().Done():
+	workCtx, release, admissionErr := s.admission.acquire(r.Context())
+	if admissionErr != nil {
+		writeJSON(w, http.StatusServiceUnavailable, errorResponse{Error: "executor_unavailable"})
 		return
 	}
+	defer release()
 	executionResult := "error"
 	if s.executionMetrics != nil {
 		s.executionMetrics.executionStarted(time.Since(waitStarted))
 		defer func() { s.executionMetrics.executionFinished(executionResult) }()
 	}
-	results, err := s.runner.RunBatch(r.Context(), request.judgeRequest(), request.Inputs)
+	results, err := s.runner.RunBatch(workCtx, request.judgeRequest(), request.Inputs)
 	if err != nil {
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 			executionResult = "canceled"

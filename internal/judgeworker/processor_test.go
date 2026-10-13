@@ -9,8 +9,32 @@ import (
 	"time"
 
 	"github.com/kaii9/codingJudge/internal/domain"
+	"github.com/kaii9/codingJudge/internal/executor"
 	"github.com/kaii9/codingJudge/internal/judgeworker"
 )
+
+func TestProcessorDoesNotRetryPermanentExecutorFailure(t *testing.T) {
+	calls := []string{}
+	st := &fakeStore{claim: acquiredClaim(), problem: domain.Problem{ID: "sum"}, completeOK: true, releaseOK: true, calls: &calls}
+	q := &fakeQueue{job: domain.Job{SubmissionID: "sub-1", Receipt: "1-0"}, calls: &calls}
+	j := &fakeJudge{err: &executor.CallError{Kind: executor.ErrorUnauthorized, Cause: errors.New("bad service credential")}, calls: &calls}
+	p := judgeworker.NewProcessor(st, q, j, judgeworker.Config{WorkerID: "worker", HeartbeatInterval: time.Hour, Token: func() (string, error) { return "token", nil }})
+	_ = p.ProcessOne(context.Background())
+	for _, call := range calls {
+		if call == "retry" || call == "release" {
+			t.Fatalf("permanent error retried: %v", calls)
+		}
+	}
+	found := false
+	for _, call := range calls {
+		if call == "dead" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("permanent error not dead-lettered: %v", calls)
+	}
+}
 
 type fakeWorkerMetrics struct {
 	mu             sync.Mutex

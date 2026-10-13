@@ -1,0 +1,26 @@
+syntax = "proto3";
+package gojudge.executor.v1;
+option go_package = "github.com/kaii9/codingJudge/api/gen/executor/v1;executorv1";
+
+service ExecutorService {
+  rpc RunBatch(RunBatchRequest) returns (RunBatchResponse);
+}
+message RunBatchRequest {
+  string language = 1;
+  string code = 2;
+  repeated string inputs = 3;
+  int32 time_limit_ms = 4;
+  int32 memory_limit_mb = 5;
+  string execution_id = 6;
+}
+message RunResult {
+  string stdout = 1;
+  string stderr = 2;
+  int32 exit_code = 3;
+  int64 duration_ms = 4;
+  bool timed_out = 5;
+  string stage = 6;
+}
+message RunBatchResponse {
+  repeated RunResult results = 1;
+}

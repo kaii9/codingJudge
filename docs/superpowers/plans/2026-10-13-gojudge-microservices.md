@@ -43,7 +43,7 @@ func TestExecutorRejectsOversubscribedWaiters(t *testing.T) {
 - [ ] Run focused tests and record RED output before implementation.
 - [ ] Define versioned protobuf, generate Go stubs, implement adapters and deadline/health/auth behavior.
 - [ ] Add a real two-server failover/recovery test and a lost-response test; prove no implicit execution replay.
-- [ ] Run `go test -race ./internal/executor ./internal/config ./cmd/executor`; commit governed executor slice.
+- [x] Run `go test -race ./internal/executor ./internal/config ./cmd/executor`; commit governed executor slice.
 
 ## Task 2: Extract judge domain and immutable problem snapshots
 

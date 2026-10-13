@@ -104,10 +104,14 @@ type WorkerConfig struct {
 	ExecutorURLs      []string
 	ExecutorToken     string
 	ExecutorTimeout   time.Duration
+	ExecutorProtocol  string
 }
 
 type ExecutorConfig struct {
 	Addr           string
+	GRPCAddr       string
+	MaxWaiters     int
+	WaitTimeout    time.Duration
 	Token          string
 	MaxConcurrency int
 	ShutdownGrace  time.Duration
@@ -161,6 +165,13 @@ func LoadWorker(getenv func(string) string) (WorkerConfig, error) {
 		cfg.WorkerID = fmt.Sprintf("%s-%d", hostname, os.Getpid())
 	}
 	var err error
+	cfg.ExecutorProtocol = getenv("EXECUTOR_PROTOCOL")
+	if cfg.ExecutorProtocol == "" {
+		cfg.ExecutorProtocol = "http"
+	}
+	if cfg.ExecutorProtocol != "http" && cfg.ExecutorProtocol != "grpc" {
+		return WorkerConfig{}, fmt.Errorf("EXECUTOR_PROTOCOL must be http or grpc")
+	}
 	if cfg.Concurrency, err = parsePositiveInt(getenv("WORKER_CONCURRENCY"), cfg.Concurrency); err != nil {
 		return WorkerConfig{}, fmt.Errorf("WORKER_CONCURRENCY: %w", err)
 	}
@@ -237,6 +248,9 @@ func LoadWorker(getenv func(string) string) (WorkerConfig, error) {
 func LoadExecutor(getenv func(string) string) (ExecutorConfig, error) {
 	cfg := ExecutorConfig{
 		Addr:           ":8090",
+		GRPCAddr:       ":8091",
+		MaxWaiters:     4,
+		WaitTimeout:    5 * time.Second,
 		Token:          getenv("EXECUTOR_TOKEN"),
 		MaxConcurrency: 2,
 		ShutdownGrace:  30 * time.Second,
@@ -245,6 +259,12 @@ func LoadExecutor(getenv func(string) string) (ExecutorConfig, error) {
 	}
 	if value := getenv("EXECUTOR_ADDR"); value != "" {
 		cfg.Addr = value
+	}
+	if value := getenv("EXECUTOR_GRPC_ADDR"); value != "" {
+		cfg.GRPCAddr = value
+	}
+	if !isValidAddr(cfg.GRPCAddr) {
+		return ExecutorConfig{}, fmt.Errorf("invalid EXECUTOR_GRPC_ADDR")
 	}
 	if cfg.Token == "" {
 		return ExecutorConfig{}, fmt.Errorf("EXECUTOR_TOKEN is required")
@@ -255,6 +275,15 @@ func LoadExecutor(getenv func(string) string) (ExecutorConfig, error) {
 	var err error
 	if cfg.MaxConcurrency, err = parsePositiveInt(getenv("EXECUTOR_MAX_CONCURRENCY"), cfg.MaxConcurrency); err != nil {
 		return ExecutorConfig{}, fmt.Errorf("EXECUTOR_MAX_CONCURRENCY: %w", err)
+	}
+	if value := getenv("EXECUTOR_MAX_WAITERS"); value != "" {
+		cfg.MaxWaiters, err = strconv.Atoi(value)
+		if err != nil || cfg.MaxWaiters < 0 {
+			return ExecutorConfig{}, fmt.Errorf("EXECUTOR_MAX_WAITERS must be non-negative")
+		}
+	}
+	if cfg.WaitTimeout, err = parsePositiveDuration(getenv("EXECUTOR_WAIT_TIMEOUT"), cfg.WaitTimeout); err != nil {
+		return ExecutorConfig{}, fmt.Errorf("EXECUTOR_WAIT_TIMEOUT: %w", err)
 	}
 	if cfg.ShutdownGrace, err = parsePositiveDuration(getenv("EXECUTOR_SHUTDOWN_GRACE"), cfg.ShutdownGrace); err != nil {
 		return ExecutorConfig{}, fmt.Errorf("EXECUTOR_SHUTDOWN_GRACE: %w", err)

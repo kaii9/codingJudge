@@ -99,7 +99,7 @@ func TestClientPoolBalancesConcurrentCalls(t *testing.T) {
 func newExecutorTestServer(t *testing.T, output string) *httptest.Server {
 	t.Helper()
 	runner := &fakeBatchRunner{results: []judge.RunResult{{Stdout: output, Stage: judge.StageRun}}}
-	server, err := NewServer(runner, "internal-secret", 1, nil, nil)
+	server, err := NewServer(runner, "internal-secret", 1, nil, nil, WithAdmission(100, time.Second))
 	if err != nil {
 		t.Fatal(err)
 	}
