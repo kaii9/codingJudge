@@ -20,3 +20,4 @@ CREATE TABLE user_sessions (
  expires_at TIMESTAMPTZ NOT NULL,created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX user_sessions_user_idx ON user_sessions(user_id,expires_at);
+
