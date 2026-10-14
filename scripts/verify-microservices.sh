@@ -2,6 +2,9 @@
 set -euo pipefail
 task_root="$(cd "$(dirname "$0")/.." && pwd)"
 compose=(docker compose -f "$task_root/deploy/compose/microservices.yml")
+if [ "${CJ_MICRO_TRACING:-0}" = 1 ]; then
+  compose+=(-f "$task_root/deploy/compose/microservices-tracing.yml")
+fi
 api="${CJ_MICRO_API_URL:-http://127.0.0.1:28080}"
 cookie="$(mktemp /tmp/gojudge-micro-verify.XXXXXX)"
 user="micro_$(date +%s)_$$"

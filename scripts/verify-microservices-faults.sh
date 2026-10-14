@@ -2,6 +2,9 @@
 set -euo pipefail
 task_root="$(cd "$(dirname "$0")/.." && pwd)"
 compose=(docker compose -f "$task_root/deploy/compose/microservices.yml")
+if [ "${CJ_MICRO_TRACING:-0}" = 1 ]; then
+  compose+=(-f "$task_root/deploy/compose/microservices-tracing.yml")
+fi
 api="${CJ_MICRO_API_URL:-http://127.0.0.1:28080}"
 cookie="$(mktemp /tmp/gojudge-micro-fault.XXXXXX)"
 user="fault_$(date +%s)_$$"
@@ -18,7 +21,8 @@ a,b=map(int,input().split())
 time.sleep(0.9)
 print(a+b)'
 verify_recovery() {
-  local mode="$1" response id active status attempts
+  local mode="$1" response id active status attempts trace_id
+  trace_id="$(openssl rand -hex 16)"
   "${compose[@]}" stop executor-b >/dev/null
   if [ "$mode" = forced-drain ]; then
     CJ_MICRO_EXECUTOR_SHUTDOWN_GRACE=100ms "${compose[@]}" up -d --no-deps --force-recreate --wait executor >/dev/null
@@ -26,6 +30,7 @@ verify_recovery() {
     "${compose[@]}" up -d --no-deps --wait executor >/dev/null
   fi
   response="$(curl -fsS -b "$cookie" -H 'Content-Type: application/json' -H "Idempotency-Key: $user-$mode" \
+    -H "traceparent: 00-$trace_id-1111111111111111-01" \
     -d "$(jq -nc --arg code "$code" '{problemId:"sum",language:"python",code:$code}')" "$api/submissions")"
   id="$(jq -r '.id' <<<"$response")"
   [[ "$id" =~ ^sub-[a-f0-9-]+$ ]]
@@ -56,7 +61,7 @@ verify_recovery() {
   test "$status" = accepted
   attempts="$("${compose[@]}" exec -T postgres psql -U postgres -d cj_judge -Atc "SELECT judge_attempts FROM submissions WHERE id='$id'")"
   test "$attempts" -ge 2
-  printf 'in-flight %s recovered submission=%s attempts=%s final=accepted\n' "$mode" "$id" "$attempts"
+  printf 'in-flight %s recovered submission=%s attempts=%s final=accepted trace=%s\n' "$mode" "$id" "$attempts" "$trace_id"
 }
 
 verify_recovery SIGKILL
