@@ -28,7 +28,7 @@ Observability: slog + Prometheus + Grafana
 
 微服务模式面试请先读 [新版分章教材](docs/interview/microservices/README.md)：架构与各功能调用链、Outbox/租约/fencing 故障窗口、gRPC/追踪、测试与演示、24 个追问和简历表述。下面两份早期简历/手册主要描述旧 HTTP 模式，历史压测不能当作微服务新拓扑结果。
 
-当前主线已合并收尾实现，原完整前端审计阻断已解决。结果、对应 CI 版本及仍保留的生产边界见 [2026-10-15 合并验收](docs/interview/microservices/verification-2026-10-15.md)；历史失败记录保留，不与当前状态混用。
+原完整前端审计阻断已解决，现已补齐带鉴权的 Judge RPC readiness、共享超时预算和脱敏失败诊断；源码版本 `1f1715f` 的五项远程 CI 全部通过。结果、对应版本及生产边界见 [2026-10-15 验收记录](docs/interview/microservices/verification-2026-10-15.md)，机制讲解见 [就绪检查与安全RPC排障](docs/interview/microservices/08-readiness-rpc-diagnostics.md)。历史失败保留，后续文档提交按自身 head 核对 CI。
 
 求职材料按“先使用、再理解、后深挖”组织，建议不要一次性通读所有长文：
 

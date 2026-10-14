@@ -1,6 +1,6 @@
 # 2026-10-15 主线合并与目标收尾
 
-用户批准合并后，`main` 从 `1cf5ded` 快进到 `75cf2af`，没有重新改写判题、迁移、鉴权或依赖实现。下述运行时和测试证据明确对应 `75cf2af`；本报告及关联状态更新属于后续文档改动，其远程结果应查看 main 上对应提交的 CI，不能用本文自行证明自身 CI 已通过。
+用户批准合并后，`main` 从 `1cf5ded` 快进到 `75cf2af`，没有重新改写判题、迁移、鉴权或依赖实现。第1至3节的证据对应 `75cf2af`；第6节保留后续失败，第7节记录 readiness/诊断补齐版本 `1f1715f` 的远程复验。本报告及关联状态更新属于后续文档改动，其远程结果应查看对应提交的 CI，不能用本文自行证明自身 CI 已通过。
 
 ## 1. 原定目标在 `75cf2af` 的验收情况
 
@@ -14,7 +14,7 @@
 | 完整前端依赖审计阻断 | 已解决 | 移除 braces 传递链，没有豁免、omit-dev 或不兼容降级；[第7章](07-frontend-dependency-security.md) |
 | 测试、面试教材和陈述边界 | 完成 | 七章教程、调用链、故障窗口、实验命令、问答与简历；[学习入口](README.md) |
 
-上述完成结论只对应已通过的 `75cf2af`。后续文档提交 `aac45b8` 的 main CI 微服务 job 失败，见第6节；当前不能宣称最新主线全部验收通过。无需因此盲目新增框架或更多服务。生产级扩展也不可冒充已经实现。
+上述原定目标结论对应 `75cf2af`。后续 `aac45b8` 的 main CI 微服务 job 失败，见第6节；补齐版本 `1f1715f` 已再次通过五项 CI，见第7节。不同 head 的结果不能相互替代，也不因绿灯宣布生产级能力已完成。
 
 ## 2. 同一版本的远程证据
 
@@ -59,7 +59,7 @@
 
 优先执行第4章的命令，自行记录一条正常提交、一条超时/取消、一条 Executor 失效恢复和一条 trace。然后用第5章练习 1/3/5 分钟介绍，能指出失败窗口及最终写权限。新增框架的收益低于你亲手复现并能解释现有机制。
 
-## 6. 最新 main CI 的失败与获批准的补齐
+## 6. `aac45b8` 的失败与获批准的补齐
 
 [run 38617959365](https://github.com/kaii9/codingJudge/actions/runs/38617959365) 对应 `aac45b89aa6fcd7357da526768f07cb76645c969`。frontend/test/e2e/observability 成功，microservices 首次 POST /submissions 约5010ms后 HTTP500，真实提交/rollout 后续验收没有完成。缺少底层 RPC 错误证据，不能确定是连接、DNS、handler 或存储慢，更不能把预期的数据库权限/回滚测试日志误认作根因。
 
@@ -76,4 +76,23 @@
 - collector-backed正常提交，trace `91335e6de0bd3fd207577209e5d78a0a`，四服务、8 spans、1 attempt、0 Error spans。独立栈停止后Jaeger内存数据不保留。
 - 停止独立栈的 Judge API：Platform `/readyz` 返回503及 `component=judge_rpc`，`/healthz` 仍200；实际日志有 Health/Check、DeadlineExceeded/CONNECTING 和 Unavailable/TRANSIENT_FAILURE、耗时及trace ID，无原始错误或token。重新启动后 `/readyz` 恢复200。连接结束状态没有被当作历史CI500的根因证据。
 
-本轮新增变更仅针对 Platform 客户端和 readiness；此前在途SIGKILL/强制drain有历史与远程证据，但没有把它们说成本轮重新实测。新提交仍须独立远程复验，不能用本地结果宣称当前 main CI 全绿。
+上述本地运行没有重新执行在途SIGKILL/强制drain；第7节是新版本远程 CI 重新执行这两项的证据。不能把远程实验说成本机实验，或用本地结果宣称任意 main head 全绿。
+
+## 7. readiness/诊断补齐版本的远程复验
+
+[run 38626088133](https://github.com/kaii9/codingJudge/actions/runs/38626088133) 的完整 head 为 `1f1715f72e9d40370bbc68a06ba99f1da5e66b24`。该 run 已 completed/success，frontend、test、e2e、microservices、observability 五个 job 全部成功；不是对旧 run 重试后混用结果。较早同分支的 `57d9dd7` run 因新提交取代而主动取消，不算通过证据。
+
+| 范围 | 本次远程结果 |
+| --- | --- |
+| 前端 | 完整 audit 0；lint/typecheck、25项 lint 契约、183项应用单测、生产构建通过 |
+| 后端 | 全量 suite、race、真实 Docker/PostgreSQL/Redis/MinIO 集成、vet、MinIO资产链路通过 |
+| 新增 RPC 验证 | API/Judge真实TCP鉴权Health、就绪装配、共享预算/取消、非SERVING/不可达、六种RPC脱敏日志，显式race通过 |
+| 内部安全与编译 | 真实 mTLS 正向/拒绝/token授权；Go冷编译、错误判定、在途取消与沙箱清理通过 |
+| 正常业务与部署 | Python/Go/C++ Accepted、排行榜收敛、单Executor失效、独立重建、历史/远程产物、两条Streams清空通过 |
+| 真实故障恢复 | 在途SIGKILL和强制drain均经2次attempt最终Accepted |
+| 追踪 | collector验证四服务正常trace：`8b17bd7e1134c5f4e6f09dcf7948434a` |
+| 浏览器 | 5 PASS、2设备互斥SKIP，22.8s；功能验收用时不是性能SLO |
+
+新实现及一行文档修订有独立只读审查，无 Critical/Important/Minor 遗留；审查者独立运行相关 race，未独立重复 Docker 或远程实验。本报告的远程证据由主执行者核对实际 run/head/job 和日志。
+
+此处记录的源代码已经通过既定验收，可以用于本轮简历/面试演示。后续只更新本报告和文档入口，不改变运行代码；该后续提交仍有自己的 CI，应核对其实际 head。当前证据不证明 `aac45b8` 的500根因已查明，也不是跨主机HA、生产PKI/轮换或全系统日志脱敏审计。
