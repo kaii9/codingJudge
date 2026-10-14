@@ -2,6 +2,8 @@ package judge
 
 import (
 	"errors"
+	"os"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -226,6 +228,29 @@ func TestGoCompilerParallelismMatchesSingleCPUSandbox(t *testing.T) {
 	}
 	if containsSubstring(args, "/cache:") {
 		t.Fatal("cross-submission writable cache introduced")
+	}
+}
+
+func TestCompilerIdentityMatchesBindMountOwnership(t *testing.T) {
+	for _, fixture := range []struct {
+		goos     string
+		uid, gid int
+		want     string
+	}{
+		{"linux", 1001, 1001, "1001:1001"},
+		{"linux", 0, 0, "0:0"},
+		{"darwin", 501, 20, "0:0"},
+		{"windows", -1, -1, "0:0"},
+	} {
+		if got := compilerUser(fixture.goos, fixture.uid, fixture.gid); got != fixture.want {
+			t.Errorf("%s compiler identity=%s, want %s", fixture.goos, got, fixture.want)
+		}
+	}
+	for _, lang := range []domain.Language{domain.LanguageGo, domain.LanguageCPP} {
+		args, ok := dockerCompileArgs(CompileRequest{Language: lang}, "/tmp/compile-owner")
+		if !ok || !containsAdjacent(args, "--user", compilerUser(runtime.GOOS, os.Getuid(), os.Getgid())) {
+			t.Errorf("%s compiler does not use owning identity: %v", lang, args)
+		}
 	}
 }
 

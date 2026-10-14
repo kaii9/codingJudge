@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -79,6 +80,17 @@ func WithSandboxMetrics(metrics SandboxMetrics) DockerRunnerOption {
 type CompileRequest struct {
 	Language      domain.Language
 	MemoryLimitMB int
+}
+
+func compilerUser(goos string, uid, gid int) string {
+	// A native Linux bind mount keeps the caller-owned directory's numeric
+	// identity. Root without DAC_OVERRIDE cannot write a 0755 runner-owned dir.
+	if goos == "linux" {
+		return strconv.Itoa(uid) + ":" + strconv.Itoa(gid)
+	}
+	// Docker Desktop presents the shared workspace as root-owned in its Linux
+	// VM; macOS/Windows host IDs are not that VM's file ownership.
+	return "0:0"
 }
 
 func NewDockerRunner(image string) *DockerRunner {
@@ -341,6 +353,7 @@ func dockerCompileArgs(req CompileRequest, workdir string) ([]string, bool) {
 	}
 	args := dockerSandboxArgs(512)
 	args = append(args,
+		"--user", compilerUser(runtime.GOOS, os.Getuid(), os.Getgid()),
 		"-v", workdir+":/workspace:rw",
 		"-w", "/workspace",
 		spec.image,
