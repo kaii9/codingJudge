@@ -119,3 +119,13 @@ func TestVerifyAcceptsGatewayBase64IDsAndNDJSON(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestVerifyDoesNotCountDifferentSubmissionsAsRecovery(t *testing.T) {
+	f := fixture(true)
+	second := spansIn(f, 2)[1].(map[string]any)
+	attributes := second["attributes"].([]any)
+	attributes[0].(map[string]any)["value"] = map[string]any{"stringValue": "sub-other:attempt-2"}
+	if _, err := verify(bytes.NewReader(encoded(t, f)), testTrace, 2); err == nil {
+		t.Fatal("different submissions counted as recovery attempts")
+	}
+}

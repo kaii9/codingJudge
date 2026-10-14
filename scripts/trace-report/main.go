@@ -124,6 +124,7 @@ func verify(input io.Reader, traceID string, minAttempts int) (Report, error) {
 	}
 	services, instances, attempts := map[string]bool{}, map[string]bool{}, map[string]bool{}
 	roots := map[string]bool{}
+	submission := ""
 	report := Report{TraceID: wanted, Spans: len(spans)}
 	for _, item := range spans {
 		services[item.service] = true
@@ -160,6 +161,11 @@ func verify(input io.Reader, traceID string, minAttempts int) (Report, error) {
 				}
 			}
 			if id != "" && number > 0 && strings.HasSuffix(id, fmt.Sprintf(":attempt-%d", number)) {
+				owner := strings.TrimSuffix(id, fmt.Sprintf(":attempt-%d", number))
+				if owner == "" || (submission != "" && submission != owner) {
+					return Report{}, fmt.Errorf("attempts belong to different submissions")
+				}
+				submission = owner
 				attempts[id] = true
 			}
 		}
