@@ -86,6 +86,8 @@ PLAYWRIGHT_BASE_URL=http://localhost:23000 npm --prefix frontend run test:e2e
 
 Monaco 的 textarea 是虚拟输入缓冲区，“选中了 textarea 全文”不等于选中了整个编辑模型。测试先等待实际语言 model、检查模型 selection覆盖全文，再用键盘输入；只读取公开 Monaco API核验，不通过它改源码。Go/C++允许输入过程产生不影响这些固定程序语义的缩进变化，Python检查精确文本；点击 Submit 后再检查真实浏览器请求字节等于编辑模型，避免把默认模板拼接问题误诊为后端错误。终态错误会立即失败，不盲等 Accepted。升级Playwright后还要安装匹配Chromium。
 
+继续验收又补齐了模拟UA平台的快捷键、可见画布点击/真实焦点断言，并将正常判题的功能测试等待与120s RPC预算对齐；整个flow150s有界，生产编译仍30s。实际复现和原因见 [第6章](06-debugging-compiler-e2e.md)，不是通过放宽判题限制隐藏失败。
+
 本次未启用 Browser plugin，按前端测试技能使用仓库已有 Playwright。前端依赖升级的实际运行记录见验收报告；构建成功本身不足以证明浏览器可用。不宣称已测试 WebKit/Firefox 或所有 UI 状态。
 
 ## 4.7 CI 是门禁，不是云部署

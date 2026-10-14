@@ -52,7 +52,9 @@ async function fillMonaco(page: Page, language: LanguageCase["value"], code: str
   await expect.poll(async () => (await monacoState(page)).language).toBe(language);
   const input = page.locator(".monaco-editor textarea.inputarea");
   await expect(input).toBeAttached({ timeout: 15_000 });
-  await input.click({ force: true });
+  // The inputarea is a virtual/transparent textarea. A forced click can hit
+  // a different layer; click the visible text canvas like a user instead.
+  await page.locator(".monaco-editor .view-lines").click({ position: { x: 40, y: 10 } });
   await expect(input).toBeFocused();
   // Monaco chooses browser keybindings from navigator.userAgent, not the OS
   // running Node. Desktop Chrome emulates Windows even on a macOS runner.
