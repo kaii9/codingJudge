@@ -19,6 +19,8 @@ jobs:
           go-version: "1.25"
       - name: verify mutual TLS contracts and token authorization
         run: go test -race ./internal/rpcsecurity -run TestMTLS -count=1 -v
+      - name: verify authenticated Judge readiness and redacted RPC diagnostics
+        run: go test -race ./cmd/api ./internal/judgerpc -count=1 -v
       - name: prepare judge images
         run: |
           docker pull golang:1.25-alpine

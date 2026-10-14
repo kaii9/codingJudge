@@ -81,9 +81,7 @@ func main() {
 		httpapi.WithReadinessCheck("store", st.Ping),
 		httpapi.WithSecureCookies(cfg.CookieSecure),
 	}
-	if remoteJudge != nil {
-		options = append(options, httpapi.WithObjectGetter(remoteJudge))
-	}
+	options = append(options, remoteJudgeOptions(remoteJudge)...)
 
 	if cfg.QueueMode == config.QueueRedisStreams {
 		client := redis.NewClient(&redis.Options{Addr: cfg.RedisAddr})
@@ -179,6 +177,16 @@ type appStore interface {
 	httpapi.ProblemStore
 	store.OutboxStore
 	Ping(context.Context) error
+}
+
+func remoteJudgeOptions(client *judgerpc.Client) []httpapi.Option {
+	if client == nil {
+		return nil
+	}
+	return []httpapi.Option{
+		httpapi.WithObjectGetter(client),
+		httpapi.WithReadinessCheck("judge_rpc", client.Ping),
+	}
 }
 
 func buildStore(ctx context.Context, cfg config.Config) (appStore, func(), error) {

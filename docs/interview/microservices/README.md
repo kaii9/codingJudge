@@ -1,6 +1,6 @@
 # GoJudge 微服务面试学习路线
 
-这套教材讲的是 `deploy/compose/microservices.yml` 模式，不是根目录 Compose 的旧 HTTP 模式。阅读日期：2026-10-14。先理解机制，再看源码，最后自己重跑实验；能解释失败窗口，比背技术名词更重要。
+这套教材讲的是 `deploy/compose/microservices.yml` 模式，不是根目录 Compose 的旧 HTTP 模式。阅读日期：2026-10-15。先理解机制，再看源码，最后自己重跑实验；能解释失败窗口，比背技术名词更重要。
 
 ## 阅读顺序
 
@@ -13,6 +13,7 @@
 | 5 | [面试问答与简历](05-interview-resume.md) | 准备 1/3/5 分钟介绍和带源码依据的追问回答 |
 | 6 | [冷编译与E2E实战排障](06-debugging-compiler-e2e.md) | 区分编译/RPC/测试预算，解释真实输入、Linux权限与不放宽校验的有界重试 |
 | 7 | [前端依赖安全与质量门槛](07-frontend-dependency-security.md) | 沿依赖链定位漏洞，解释工具迁移、负向测试、审计与维护风险的区别 |
+| 8 | [就绪检查与安全RPC排障](08-readiness-rpc-diagnostics.md) | 区分调用方就绪与服务存活，解释共享deadline、脱敏诊断和证据边界 |
 
 基础术语可先看 [原有 52 问手册](../../codingjudge-interview-handbook.md)，但它描述旧部署；本套是微服务版本的解释入口。历史压测数字见 [原简历说明](../../codingjudge-resume-project.md)，不能当作新拓扑的性能提升。
 
@@ -33,4 +34,4 @@
 - 可选 Jaeger 为内存演示后端；没有长期存储、生产采样、数据保留策略和完整 SQL/Docker tracing。
 - 安全审计有未修复上游开发依赖时，CI 就是未通过；“业务能跑”不等于“安全验收完成”。
 
-当前状态以 [2026-10-15 主线合并验收](verification-2026-10-15.md)为准：原定目标完成，完整审计阻断已解决，保留生产和维护限制。历史验收入口：[微服务原始验收报告](../../microservices-verification-2026-10-14.md)、[2026-10-14 收尾记录](verification-2026-10-14.md)。记录按版本区分本地通过、失败和远程 CI，避免把历史验证覆盖范围扩大。
+当前状态以 [2026-10-15 主线合并验收](verification-2026-10-15.md)为准：完整审计阻断已解决，但最新 main `aac45b8` 的微服务 CI 失败，不能把此前版本全绿外推到当前 head。第8章说明获批准的 readiness/诊断补齐，远程复验另行记录。历史验收入口：[微服务原始验收报告](../../microservices-verification-2026-10-14.md)、[2026-10-14 收尾记录](verification-2026-10-14.md)。

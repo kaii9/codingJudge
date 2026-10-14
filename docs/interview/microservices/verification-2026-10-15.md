@@ -2,7 +2,7 @@
 
 用户批准合并后，`main` 从 `1cf5ded` 快进到 `75cf2af`，没有重新改写判题、迁移、鉴权或依赖实现。下述运行时和测试证据明确对应 `75cf2af`；本报告及关联状态更新属于后续文档改动，其远程结果应查看 main 上对应提交的 CI，不能用本文自行证明自身 CI 已通过。
 
-## 1. 目标是否完成
+## 1. 原定目标在 `75cf2af` 的验收情况
 
 | 原定目标 | 结果 | 可核对依据 |
 | --- | --- | --- |
@@ -14,7 +14,7 @@
 | 完整前端依赖审计阻断 | 已解决 | 移除 braces 传递链，没有豁免、omit-dev 或不兼容降级；[第7章](07-frontend-dependency-security.md) |
 | 测试、面试教材和陈述边界 | 完成 | 七章教程、调用链、故障窗口、实验命令、问答与简历；[学习入口](README.md) |
 
-结论：面向当前简历/面试演示的原定开发与验收目标已完成，无需再新增框架或拆出更多服务。生产级扩展并非本轮欠交项，也不可以冒充已经实现。
+上述完成结论只对应已通过的 `75cf2af`。后续文档提交 `aac45b8` 的 main CI 微服务 job 失败，见第6节；当前不能宣称最新主线全部验收通过。无需因此盲目新增框架或更多服务。生产级扩展也不可冒充已经实现。
 
 ## 2. 同一版本的远程证据
 
@@ -58,3 +58,22 @@
 ## 5. 面试准备的下一步
 
 优先执行第4章的命令，自行记录一条正常提交、一条超时/取消、一条 Executor 失效恢复和一条 trace。然后用第5章练习 1/3/5 分钟介绍，能指出失败窗口及最终写权限。新增框架的收益低于你亲手复现并能解释现有机制。
+
+## 6. 最新 main CI 的失败与获批准的补齐
+
+[run 38617959365](https://github.com/kaii9/codingJudge/actions/runs/38617959365) 对应 `aac45b89aa6fcd7357da526768f07cb76645c969`。frontend/test/e2e/observability 成功，microservices 首次 POST /submissions 约5010ms后 HTTP500，真实提交/rollout 后续验收没有完成。缺少底层 RPC 错误证据，不能确定是连接、DNS、handler 或存储慢，更不能把预期的数据库权限/回滚测试日志误认作根因。
+
+用户批准在 `fix/judge-rpc-readiness` 补齐：Platform readiness 通过业务客户端检查带鉴权的 Judge Health；RPC 日志只记录方法、code、连接状态、耗时和有效 trace ID。保持 readiness 2s、Judge业务5s、禁配置型重试与既有沙箱限制；见[第8章](08-readiness-rpc-diagnostics.md)。
+
+本轮已通过全量 Go suite、vet、API/Judge/mTLS/HTTP race 和新增两包 race 五次重复；macOS race 链接器产生 LC_DYSYMTAB 警告，测试退出0且没有竞态报告，不把警告描述成业务错误或声称零警告。显式 CI 步骤已加入，但尚未推送触发新 head 的远程 CI。
+
+原数据栈只重建 Platform，不删除数据卷。本地首次 verify 的 Python/Go/C++ 均 Accepted，但排行榜校验失败。只读核对新用户三条 Accepted 投影存在、solved=1、实际排名56；接口固定取前50，因此不是投影丢失。后续使用独立空数据验证栈，不删除原有数据或修改生产接口迎合脚本。
+
+独立 Compose project 为 `gojudge-rpc-readiness-verification`，API/PG/Redis/MinIO/Jaeger 端口分别为38080/35432/46379/39000/36686；数据卷与原栈分开，初始化 SQL 从主工作区绑定。实际通过：
+
+- Python/Go/C++ Accepted、排行榜收敛、单 Executor 停机恢复、Executor 独立重建（Platform/Judge/Worker IDs未变）、历史与远程 source 产物读取、两条 Streams pending 归零。
+- 三项真实 PostgreSQL 集成测试：快照与结果Outbox事务、投影重复/迟到、账号不可跨领域访问。
+- collector-backed正常提交，trace `91335e6de0bd3fd207577209e5d78a0a`，四服务、8 spans、1 attempt、0 Error spans。独立栈停止后Jaeger内存数据不保留。
+- 停止独立栈的 Judge API：Platform `/readyz` 返回503及 `component=judge_rpc`，`/healthz` 仍200；实际日志有 Health/Check、DeadlineExceeded/CONNECTING 和 Unavailable/TRANSIENT_FAILURE、耗时及trace ID，无原始错误或token。重新启动后 `/readyz` 恢复200。连接结束状态没有被当作历史CI500的根因证据。
+
+本轮新增变更仅针对 Platform 客户端和 readiness；此前在途SIGKILL/强制drain有历史与远程证据，但没有把它们说成本轮重新实测。新提交仍须独立远程复验，不能用本地结果宣称当前 main CI 全绿。
