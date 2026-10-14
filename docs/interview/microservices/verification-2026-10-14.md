@@ -2,6 +2,20 @@
 
 这是收尾分支 `feat/gojudge-interview-closeout` 的记录，不表示已合并，也不表示全项绿灯。基础提交 `1cf5ded`；新增实例/attempt tracing、可选Jaeger、固定来源MinIO兼容镜像，修复已应用迁移的空白checksum、编译预算/身份和浏览器输入问题。最终状态以本节更新及对应远程CI版本为准，后文首轮失败记录不删除。
 
+## mTLS追加验证（2026-10-14）
+
+用户要求继续开发后，核对发现已实现TLS选项只有配置单测，缺少真实握手证据。本次以d75f825为基础，补齐[既有能力验证计划](../../superpowers/plans/2026-10-14-mtls-verification.md)，不新增服务或生产业务，不改运行时TLS/授权实现。
+
+- 3组`TestMTLS*`真实loopback TCP/gRPC测试连续10轮通过，无SKIP；覆盖8种客户端/协议拒绝、过期服务器证书与正向对照、Judge/Executor两个真实业务RPC适配器。
+- rpcsecurity/executor/judgerpc三包race、完整`go test ./... -count=1`及`go vet ./...`通过。macOS race linker仍有既有LC_DYSYMTAB警告，不是测试失败。
+- 正向调用观察到TLS1.3、已验证客户端链和fixture身份；可信证书配错误token时，Executor不可重试且不增加Runner次数，Judge不增加提交。
+- CA、私钥和叶证书由标准库临时生成，私钥0600，listener仅127.0.0.1随机端口；未修改全局信任库、现有Compose、数据卷或用户文档。TLS观察拦截器不替生产代码执行拒绝策略。
+- 原实现首次运行即通过；本次补充已有能力的验证，没有伪造RED或声称修复了不存在的运行时漏洞。CI新增显式`verify mutual TLS contracts and token authorization` race步骤，默认Go suite也执行，不需手动启用环境变量。
+
+业务测试使用MemoryStore和计数Runner，不在这组测试中运行Docker/真实PostgreSQL；真实的是TLS/gRPC及生产RPC适配器。不能由此宣称默认Compose已部署mTLS、生产证书ACL/轮换/吊销或跨主机PKI验收完成。教学见[3.6.1](03-grpc-tracing.md#361-真实mtls验证tls通过不等于业务授权通过)，完整远程验收按相应新提交的CI判断，不用下方旧head冒充新测试已获远程验证。
+
+`braces`再次核对仍为3.0.3、上游未有patched版本；完整审计门槛保持，因此收尾分支仍不自动合并。新增mTLS测试不能消除或豁免该独立依赖漏洞。[官方公告](https://github.com/advisories/GHSA-vfj7-8cjw-p6xm)
+
 ## 继续验收更新（2026-10-14晚间）
 
 实现与原因见[第6章](06-debugging-compiler-e2e.md)：b4b71c6限制Go编译并行度并新增真实冷编译/取消测试；fdfe68c按模拟浏览器UA选择快捷键；5052c14点击可见Monaco画布并检查焦点；65e4138使编译身份匹配普通Linux调用者拥有的目录。本轮另新增保持checksum校验的MinIO源码下载重试。

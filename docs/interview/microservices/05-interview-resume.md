@@ -41,6 +41,8 @@
 
 token证明调用者被允许访问内部服务，不证明用户可读某份提交。Judge按 user+submission约束资源。追问：恶意内部平台能伪造 user ID 吗？目前平台是受信调用者，可以代表用户；尚未实现终端用户签名身份或细粒度服务权限矩阵。
 
+TLS追问：可信证书就能判题吗？不能；真实mTLS测试中，错误token仍让Executor返回Unauthenticated且不执行Runner，让Judge不增加提交。证书认证、服务token、最终用户资源授权分层验证，见[3.6.1](03-grpc-tracing.md#361-真实mtls验证tls通过不等于业务授权通过)。不把这说成证书角色ACL、自动轮换或跨主机部署已完成。
+
 ### 5. Outbox 能保证消息只发一次吗？
 
 不能。XADD 成功但标 published 失败会重发。它保证发布意图不因本地 commit 后崩溃丢失，消费者仍要幂等。追问：Redis整库丢失怎么办？已published记录不会自动全量重发，需要灾备/对账设计，当前不能说已验证零丢失。

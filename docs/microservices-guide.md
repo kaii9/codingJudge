@@ -127,6 +127,8 @@ RPC_TLS_SERVER_NAME=可选的目标服务证书名称（客户端）
 
 三项证书配置必须一起提供，部分配置会启动失败，不回落明文。仍需按服务授权 Token；TLS 身份和 user_id 是不同概念。外部 HTTP 入口继续使用现有 Session。
 
+真实loopback mTLS/拒绝用例与业务token测试已加入默认Go suite及microservices CI：`go test ./internal/rpcsecurity -run TestMTLS -count=10 -v`。测试证明现有参数和两个业务RPC适配器可用于TLS1.3双向认证，不代表本地默认Compose已经启用TLS、生产PKI/轮换/吊销或跨主机部署已验收。详见[调用治理教材](interview/microservices/03-grpc-tracing.md#361-真实mtls验证tls通过不等于业务授权通过)。
+
 ## 追踪与观测
 
 Go 服务使用 OpenTelemetry。HTTP/RPC 创建 span；traceparent 在 judge_outbox 中保存，Relay 写入 Stream，Worker 建立 attempt span，再传播到 Executor。日志记录 traceparent；不记录源码、隐藏测试或凭据。

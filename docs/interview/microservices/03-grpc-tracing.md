@@ -50,9 +50,35 @@ Executor client 的手动 resolver 接收固定 endpoints；`round_robin` 在可
 
 RPC 先检查服务 token，之后才能执行应用 handler。Judge 还以 user ID + submission ID 检查资源归属；服务身份不能替代最终用户授权。token 使用常量时间比较；本地默认凭证只是演示值，不能用于公网。
 
-TLS 配置有 cert/key/CA 三项时启用 TLS 1.3 与双向证书校验；配置不完整则启动失败，不静默回退明文。本地 Compose 不配置 TLS，内部 gRPC 端口不发布到宿主。已验证不完整配置拒绝，未完成真实跨主机证书轮换、吊销和服务身份授权矩阵。
+TLS 配置有 cert/key/CA 三项时启用 TLS 1.3 与双向证书校验；配置不完整则启动失败，不静默回退明文。本地 Compose 不配置 TLS，内部 gRPC 端口不发布到宿主。配置拒绝与真实loopback mTLS握手已验证，未完成跨主机证书部署、轮换、吊销和服务身份授权矩阵。
 
-Docker Socket 只在 Executor，Web/Worker 不持有。用户程序运行时降为 nobody、清空环境；可信计时包装器掌握 root 控制帧密钥。容器还受无网络、CPU/内存/PID/输出上限、只读文件系统和 no-new-privileges 约束。编译阶段仍是受限容器中的旧编译路径，不能泛称所有步骤均非 root，也不能把 Docker 说成 VM 级强多租户隔离。
+Docker Socket 只在 Executor，Web/Worker 不持有。用户程序运行时降为 nobody、清空环境；可信计时包装器掌握 root 控制帧密钥。容器还受无网络、CPU/内存/PID/输出上限、只读文件系统和 no-new-privileges 约束。编译阶段匹配工作目录所有者，仍可能为root，详见[冷编译排障](06-debugging-compiler-e2e.md)；不能泛称所有步骤均非 root，也不能把 Docker 说成 VM 级强多租户隔离。
+
+### 3.6.1 真实mTLS验证：TLS通过不等于业务授权通过
+
+单向TLS让客户端验证服务器；mTLS还让服务器验证客户端证书。握手保护连接，业务token决定调用权限，user ID + submission ID决定资源归属，三层不能互相替代。[gRPC认证机制](https://grpc.io/docs/guides/auth/)
+
+新增[真实传输测试](../../../internal/rpcsecurity/mtls_test.go)，不是只检查`tls.Config`字段。[临时证书fixture](../../../internal/rpcsecurity/pki_fixture_test.go)用Go标准库生成ECDSA CA与serverAuth/clientAuth证书，经127.0.0.1随机端口发送真实gRPC请求；私钥0600、测试结束清理自己的临时目录，不修改机器信任库。
+
+| 情况 | 实际断言 |
+| --- | --- |
+| 正确CA、证书、目标名称 | 成功RPC；服务端TLS1.3、VerifiedChains非空、实际客户端身份符合fixture |
+| 无客户端证书、未知客户端CA、过期客户端、错误客户端EKU | 握手失败，没有请求进入服务拦截器/handler |
+| 不信任服务器CA、服务器名称不匹配、过期服务器 | 客户端拒绝，没有handler调用 |
+| 仅支持TLS1.2或直接明文 | 被现有TLS1.3服务拒绝，不回退明文 |
+| 可信证书但token错误 | Executor返回Unauthenticated/不可重试分类且Runner次数不增加；Judge不增加提交 |
+| 无客户端证书的单向TLS对照 | 能调用对照Health服务；证明上面的拒绝不是“客户端根本不能工作” |
+
+服务端测试拦截器只观察真实TLS状态，不替生产代码拒绝明文，否则会把生产配置漏洞“测绿”。另用故意明文、仅含Health的loopback对照验证观察器确实放行并记录非TLS调用；这不是把生产服务改成明文。负向用例前后有正确证书的正向控制；过期服务器也有未过期对照，避免所有连接都失败仍算安全通过。
+
+```bash
+go test ./internal/rpcsecurity -run TestMTLS -count=10 -v
+go test -race ./internal/rpcsecurity ./internal/executor ./internal/judgerpc -count=1
+```
+
+测试没有integration build tag或需要手动打开的环境变量，`go test ./...`默认运行；microservices CI另有显式race步骤。现有TLS实现首跑通过，本次补的是缺失的验证，不伪造RED，也未因测试改动生产认证逻辑。
+
+面试可讲：我区分传输信任和业务授权，既测成功也测证书/协议拒绝，并证明可信证书不能绕过token。服务器名称由SAN与ServerName校验；测试观察的客户端CN不是服务ACL。信任同一CA不等于实现服务角色权限矩阵。证书在启动时读取，不具备热更新、自动轮换或吊销检测；loopback测试也不代表真实跨主机mTLS部署已验收。
 
 ## 3.7 Trace 不是什么
 

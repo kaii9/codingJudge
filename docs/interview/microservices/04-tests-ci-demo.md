@@ -55,11 +55,14 @@ go test -tags integration ./internal/store -run TestMicroservice -count=1 -v
 TEST_DOCKER_RUNNER=1 TEST_GO_COMPILER=1 \
 go test -tags integration ./internal/judge -count=1 -v
 go test ./internal/executor -run 'TestGRPC|TestFrozen|TestDrain|TestForced' -count=1 -v
+go test ./internal/rpcsecurity -run TestMTLS -count=10 -v
 ```
 
 专用 `TestMicroservice*` 用随机 schema 验证并清理自己的 schema，仍建议用演示库。旧 `TEST_DATABASE_URL` 集成套件有初始化/清理行为，绝不能指向重要库。缺环境变量而 SKIP 是“未覆盖”，不是数据库集成通过。
 
 新增Go冷编译测试需要`TEST_GO_COMPILER=1`，覆盖真实双用例、语法错误与确认运行中后取消/无沙箱泄漏；CI的microservices job也显式启用。参数单测与fake不能替代这条真实Linux权限路径。源码与实测见[第6章](06-debugging-compiler-e2e.md)。
+
+mTLS测试默认运行，覆盖真实握手、证书/协议拒绝与两个真实业务RPC适配器的token授权。它只使用测试临时证书和loopback listener，无需Docker或现有业务库；不是fake TLS，也不是证书轮换测试。CI有单独的`verify mutual TLS contracts and token authorization` race步骤，解释见[第3章](03-grpc-tracing.md)。
 
 必须认识三个测试名：[快照+结果事务](../../../internal/store/microservices_integration_test.go) 的 `TestMicroserviceSnapshotAndResultOutboxAtomic`，投影 `TestMicroserviceProjectionDuplicateAndLateEvent`，权限 `TestMicroserviceDatabaseCredentialsCannotCrossDomains`。
 

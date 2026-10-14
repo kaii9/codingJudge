@@ -17,6 +17,8 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: "1.25"
+      - name: verify mutual TLS contracts and token authorization
+        run: go test -race ./internal/rpcsecurity -run TestMTLS -count=1 -v
       - name: prepare judge images
         run: |
           docker pull golang:1.25-alpine
