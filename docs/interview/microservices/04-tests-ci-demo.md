@@ -52,11 +52,14 @@ make microservices-up
 TEST_JUDGE_DATABASE_URL='postgres://cj_judge:cj-judge-local-only@127.0.0.1:25432/cj_judge?sslmode=disable' \
 TEST_PLATFORM_DATABASE_URL='postgres://cj_platform:cj-platform-local-only@127.0.0.1:25432/cj_platform?sslmode=disable' \
 go test -tags integration ./internal/store -run TestMicroservice -count=1 -v
-TEST_DOCKER_RUNNER=1 go test -tags integration ./internal/judge -count=1 -v
+TEST_DOCKER_RUNNER=1 TEST_GO_COMPILER=1 \
+go test -tags integration ./internal/judge -count=1 -v
 go test ./internal/executor -run 'TestGRPC|TestFrozen|TestDrain|TestForced' -count=1 -v
 ```
 
 专用 `TestMicroservice*` 用随机 schema 验证并清理自己的 schema，仍建议用演示库。旧 `TEST_DATABASE_URL` 集成套件有初始化/清理行为，绝不能指向重要库。缺环境变量而 SKIP 是“未覆盖”，不是数据库集成通过。
+
+新增Go冷编译测试需要`TEST_GO_COMPILER=1`，覆盖真实双用例、语法错误与确认运行中后取消/无沙箱泄漏；CI的microservices job也显式启用。参数单测与fake不能替代这条真实Linux权限路径。源码与实测见[第6章](06-debugging-compiler-e2e.md)。
 
 必须认识三个测试名：[快照+结果事务](../../../internal/store/microservices_integration_test.go) 的 `TestMicroserviceSnapshotAndResultOutboxAtomic`，投影 `TestMicroserviceProjectionDuplicateAndLateEvent`，权限 `TestMicroserviceDatabaseCredentialsCannotCrossDomains`。
 
@@ -97,6 +100,8 @@ Monaco 的 textarea 是虚拟输入缓冲区，“选中了 textarea 全文”�
 本次 main 首次远程 [run 38505707075](https://github.com/kaii9/codingJudge/actions/runs/38505707075) 暴露两类问题：原 MinIO 镜像新 runner 无法拉取；npm audit 发现新披露漏洞。验证入口有效，但结果是红灯，不能拿观测配置单个 job 成功替代全流程通过。
 
 处理方式：从原官方 MinIO 源码 commit `0d7408fc9969caf07de6a8c3a84f9fbb10a6739e` 重建演示镜像，保留版本/卷；升级可修复前端依赖，不执行 `npm audit fix --force` 强制降级 Next ESLint。2026-10-14 剩余 braces≤3.0.3 未有修复版本，5 项高危报告来自其传递链；用户决定不放行，原 `--audit-level=high` 保留。[braces 官方公告](https://github.com/advisories/GHSA-vfj7-8cjw-p6xm)
+
+两次源码构建还遇到校验服务器瞬时HTTP/2错误；辅助脚本仅对已列举传输错误最多重试3次，checksum mismatch/SECURITY ERROR仍立即失败。这不会豁免漏洞，也不是业务执行RPC的重放策略，具体测试与边界见[第6章](06-debugging-compiler-e2e.md)。
 
 MinIO 社区仓库当前不再维护并采用源码分发；本项目兼容镜像是保持教学演示可复现，不是安全升级，也不能据此宣称对象存储适合公网生产。生产需要单独评估维护中的 S3 服务及迁移、备份、恢复方案。[MinIO 官方说明](https://github.com/minio/minio)
 

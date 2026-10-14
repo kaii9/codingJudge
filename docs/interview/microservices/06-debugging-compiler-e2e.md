@@ -1,6 +1,6 @@
 # 6. 实战排障：Go 冷编译与本地 E2E
 
-本章记录继续验收时定位的三个不同问题：编译并行度与单核配额、浏览器平台快捷键、虚拟编辑器点击焦点。不要将它们统一归结为“机器慢”，也不要看到一次通过就删掉先前失败记录。
+本章记录继续验收时定位的五个不同问题：编译并行度与单核配额、浏览器平台快捷键、虚拟编辑器点击焦点、Linux编译目录权限，以及源码构建的瞬时网络错误。不要将它们统一归结为“机器慢”，也不要看到一次通过就删掉先前失败记录。
 
 ## 6.1 编译时间不等于用户程序运行时间
 
@@ -73,5 +73,41 @@ Go/C++固定测试程序允许编辑器输入时的水平缩进变化；Python�
 可以回答：我没有直接加大判题限时。先确认编译和RPC预算不同，把编译并行度匹配CPU配额；浏览器侧又找到了模拟平台与宿主平台混淆，以及虚拟textarea的焦点问题，保留真实model与请求字节断言。功能等待与现有RPC预算一致，错误终态仍立即失败；性能验证另做，不用功能测试等待值充当SLO。
 
 练习：如果页面显示Running但数据库已经AC，你会优先查什么？如果数据库CE并写了`compilation timed out`，又应该查什么？两者的修复不应相同。
+
+## 6.7 为什么本机能编译，Linux CI却报Permission denied
+
+新冷编译集成测试在Linux GitHub runner暴露了真实权限问题：宿主进程UID1001创建0755临时工作目录，Docker编译容器默认root，但已经`--cap-drop ALL`。容器root不再拥有DAC_OVERRIDE，不能向属于1001的目录写`/workspace/program`。因此“root一定能写”是错误推断；原本root运行的Executor创建root目录，未触发同一条件。
+
+本机Docker Desktop的实际bind-mount `stat`却显示Linux VM内目录属于0:0，而macOS调用者是501:20。直接把Mac UID传入Linux VM也不正确。
+
+最小修复是让编译容器的身份匹配已验证的挂载语义：
+
+| 环境 | 编译`--user` | 验证范围 |
+| --- | --- | --- |
+| 普通Linux Docker daemon | 调用进程UID:GID | GitHub runner实际Go编译、CE、取消通过；Go/C++业务smoke通过 |
+| macOS Docker Desktop | 0:0 | 本机挂载stat与实际Go/C++编译通过 |
+| Windows Desktop | 当前回退0:0 | 仅参数单测，未做真实Windows环境验收 |
+| rootless/userns remap、远程daemon | 不作兼容保证 | 文件身份与路径映射需另行验证，不能外推 |
+
+没有使用chmod777、增加capabilities或sudo CI放行。编译仍是只读根文件系统、无网络、CPU1/512MiB/PID64/30s；用户程序运行时的降权包装器未改变。
+
+源码 `compilerUser` / `dockerCompileArgs` 和测试 `TestCompilerIdentityMatchesBindMountOwnership` 位于 [Runner](../../../internal/judge/docker_runner.go) / [参数回归测试](../../../internal/judge/docker_runner_test.go)。远程head65e4138真实Go冷编译约8.10s、语法错误3.89s、在途取消0.23s通过；这仍是单个环境样本，不是性能承诺。
+
+面试追问：移除root的capabilities以后，它是否仍能写任意宿主目录？bind mount的路径相同是否代表两端的UID映射相同？回答应以daemon与文件所有者为依据，而不是仅看容器内用户名。
+
+## 6.8 可靠重试不是“失败就再试一次”
+
+MinIO兼容镜像从固定官方源码构建。两次远程CI在校验模块时出现`sum.golang.org` HTTP/2 `INTERNAL_ERROR`，属于传输错误，不是checksum mismatch。不能通过`GOSUMDB=off`把构建变绿。[Go模块校验说明](https://go.dev/ref/mod#authenticating)
+
+[构建辅助脚本](../../../deploy/verified-go-install.sh)最多执行3次原样`go install`，间隔2s，仅重试列出的瞬时网络错误（HTTP/2 INTERNAL_ERROR、连接重置、超时、unexpected EOF、502/503/504）。没有改变源码commit、ldflags或校验环境。SECURITY ERROR/checksum mismatch优先立即失败，即使同一消息也含unexpected EOF；编译错误、未识别错误、第三次网络错误同样返回失败。这是重试次数预算，不声称每一次网络请求都有额外的端到端deadline。
+
+```bash
+go test ./scripts -run TestVerifiedGoInstallRetriesOnlyTransientTransport -count=1 -v
+docker build -f deploy/Dockerfile.minio -t gojudge-minio:2025-04-22 .
+```
+
+[回归测试](../../../scripts/verified_go_install_test.go)用隔离假Go进程验证：一次瞬时失败后成功、持续网络失败恰好3次、永久错误1次、checksum错误1次、正常成功1次，以及固定参数和GOSUMDB未改变。测试先因缺失重试失败，再通过；真实镜像构建/版本/对象访问是另一层验收，不能由假进程测试替代。
+
+这与判题RPC重试语义不同：下载固定不可变模块可以重复；执行请求超时却可能已被下游接受，必须考虑执行ID、去重/租约/fencing与任务恢复。不能把这个shell循环复制到业务RPC里无限重放。
 
 完整结果和远程CI按 [最新验收记录](verification-2026-10-14.md) 的版本阅读。`braces`未修复开发依赖是另一条独立安全门禁，本章的业务/测试修复不构成审计豁免。

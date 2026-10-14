@@ -10,6 +10,10 @@
 4. 重建Executor，运行正常三语言、真实fault/trace/数据库/Go suite，再做本机浏览器操作和已有E2E核验。浏览器调试按当前Playwright技能使用CLI；已有仓库测试保留。
 5. 更新面试教材解释编译与运行预算、冷缓存和资源竞争，记录通过/失败范围；推送同一分支重新核对远程CI，审计未通过则保留分支不合并。
 
+执行中补充的必要修复：真实Linux compiler集成发现cap-drop后的root无法写runner拥有的0755目录，按已验证daemon挂载语义匹配编译UID/GID，不增加权限。MinIO源码构建两次遇到sum.golang.org瞬时HTTP/2错误，新增仅限传输错误的3次重试；checksum和永久错误不得重试，不修改GOSUMDB。
+
 ## 验收记录
 
 2026-10-14初查：CI38538827449，head788913f，test/microservices/e2e/observability PASS，frontend audit FAIL。npm braces最新3.0.3；Next eslint最新16.4.0仍依赖fast-glob3.3.1。官方GHSA-vfj7-8cjw-p6xm暂无patched版本。当前本地栈健康，未删卷。
+
+2026-10-14继续执行：b4b71c6编译并行度与真实Go测试；fdfe68c按模拟浏览器UA选择快捷键；5052c14点击可见Monaco画布并断言焦点，本机重复E2E10 PASS/4设备互斥SKIP；65e4138匹配编译目录身份，远程CI38572861979的test/microservices/e2e/observability均PASS（含Linux真实Go冷编译与取消），frontend仅完整audit FAIL。完整历史、后续镜像重试与最终head验收见[收尾记录](../../interview/microservices/verification-2026-10-14.md)。

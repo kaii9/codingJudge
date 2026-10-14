@@ -11,7 +11,7 @@
 | 3 | [gRPC 与跨服务追踪](03-grpc-tracing.md) | 分清超时、取消、健康选择、重试、幂等及 trace 的关系 |
 | 4 | [测试、CI 与演示](04-tests-ci-demo.md) | 能实际运行测试、注入故障，并指出实验不能证明什么 |
 | 5 | [面试问答与简历](05-interview-resume.md) | 准备 1/3/5 分钟介绍和带源码依据的追问回答 |
-| 6 | [冷编译与E2E实战排障](06-debugging-compiler-e2e.md) | 区分编译/RPC/测试预算，解释浏览器平台、焦点与真实输入断言 |
+| 6 | [冷编译与E2E实战排障](06-debugging-compiler-e2e.md) | 区分编译/RPC/测试预算，解释真实输入、Linux权限与不放宽校验的有界重试 |
 
 基础术语可先看 [原有 52 问手册](../../codingjudge-interview-handbook.md)，但它描述旧部署；本套是微服务版本的解释入口。历史压测数字见 [原简历说明](../../codingjudge-resume-project.md)，不能当作新拓扑的性能提升。
 
