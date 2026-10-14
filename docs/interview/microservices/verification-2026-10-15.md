@@ -65,7 +65,7 @@
 
 用户批准在 `fix/judge-rpc-readiness` 补齐：Platform readiness 通过业务客户端检查带鉴权的 Judge Health；RPC 日志只记录方法、code、连接状态、耗时和有效 trace ID。保持 readiness 2s、Judge业务5s、禁配置型重试与既有沙箱限制；见[第8章](08-readiness-rpc-diagnostics.md)。
 
-本轮已通过全量 Go suite、vet、API/Judge/mTLS/HTTP race 和新增两包 race 五次重复；macOS race 链接器产生 LC_DYSYMTAB 警告，测试退出0且没有竞态报告，不把警告描述成业务错误或声称零警告。显式 CI 步骤已加入，但尚未推送触发新 head 的远程 CI。
+本轮已通过全量 Go suite、vet、API/Judge/mTLS/HTTP race 和新增两包 race 五次重复；macOS race 链接器产生 LC_DYSYMTAB 警告，测试退出0且没有竞态报告，不把警告描述成业务错误或声称零警告。显式 CI 步骤已加入。本节记录提交前的本地证据，不构成新 head 的远程验收；对应版本须核对[分支 CI 的 head 与结果](https://github.com/kaii9/codingJudge/actions?query=branch%3Afix%2Fjudge-rpc-readiness)。
 
 原数据栈只重建 Platform，不删除数据卷。本地首次 verify 的 Python/Go/C++ 均 Accepted，但排行榜校验失败。只读核对新用户三条 Accepted 投影存在、solved=1、实际排名56；接口固定取前50，因此不是投影丢失。后续使用独立空数据验证栈，不删除原有数据或修改生产接口迎合脚本。
 
