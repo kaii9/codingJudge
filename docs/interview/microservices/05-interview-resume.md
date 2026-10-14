@@ -125,4 +125,6 @@ deadline是最晚结束时间，cancel是主动终止信号。子任务不能超
 
 架构源码从 [第1章](01-architecture-call-chains.md) 顺序读；可靠性不变量和测试见 [第2章](02-reliability-failure-windows.md)；协议/追踪见 [第3章](03-grpc-tracing.md)；完整命令见 [第4章](04-tests-ci-demo.md)。不用死记行号，记函数名、条件和测试名。
 
+想练习“如何用证据排障”，再读[第6章](06-debugging-compiler-e2e.md)：为什么数据库已AC但E2E失败、cap-drop后的root为什么写不了目录、下载重试为什么不能直接套给执行RPC。回答要同时包含修复与未验证边界。
+
 面试前自测：能不看稿讲清两个Outbox；能画出先AC后榜单的时间差；能解释旧token写入失败；能运行三语言E2E和在途故障演示；能坦然指出未修复audit、同机daemon、未验证TLS轮换和缺失灾备。做到这些，比再多写几个框架名更有说服力。

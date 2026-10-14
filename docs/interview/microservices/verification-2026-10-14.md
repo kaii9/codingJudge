@@ -11,8 +11,9 @@
 | Go全量 / vet | PASS | `go test ./... -count=1`、`go vet ./...` |
 | judge / worker / executor / scripts race | PASS | 4个包；macOS linker的LC_DYSYMTAB警告非测试失败 |
 | 真实Go冷编译 / CE / 在途取消 | PASS | 本机通过；Linux CI head65e4138分别约8.10s/3.89s/0.23s |
-| 专用PostgreSQL集成 | PASS | 本轮3项事务/投影/账号隔离测试；后续未更改Store实现 |
-| frontend lint / typecheck / unit | PASS | 本轮13文件183测试；应用界面未修改 |
+| 整套Docker Runner集成 | PASS | head276b892显式同时启用两个TEST标志，27.256s，无SKIP；本机Go冷编译10.17s/CE4.72s/取消0.88s |
+| 专用PostgreSQL集成 | PASS | head276b892新跑3项事务/投影/账号隔离测试，0.815s |
+| frontend lint / typecheck / unit | PASS | head276b892新跑13文件183测试；应用界面未修改 |
 | 本机重复浏览器E2E | PASS | 新镜像部署后52.1s，10通过、4设备互斥跳过；单worker重复两轮，不依赖失败重试 |
 | MinIO源码镜像重构建 | PASS | 原release/commit未变，Go1.25.11；mc来自固定源码，version为DEVELOPMENT.GOGET，不冒充官方发布二进制 |
 | 下载重试单测 | PASS | 一次瞬时失败成功/3次失败终止/永久及checksum错误立即失败/正常成功；参数、校验环境与退出码保持 |
@@ -40,6 +41,7 @@
 - [run38570319676](https://github.com/kaii9/codingJudge/actions/runs/38570319676)，headb4b71c6：新增真实编译测试暴露Linux目录Permission denied；test遇sum.golang.org HTTP/2传输错误；audit仍FAIL。
 - [run38571367833](https://github.com/kaii9/codingJudge/actions/runs/38571367833)，head5052c14：浏览器/观测PASS；Linux权限问题尚未修复，MinIO构建再次遇HTTP/2错误。不能据浏览器通过声称该head全验收。
 - [run38572861979](https://github.com/kaii9/codingJudge/actions/runs/38572861979)，head65e4138：test（含完整legacy asset smoke）、microservices（含新增Linux真实Go编译/取消、故障及collector）、e2e（5 PASS/2设备互斥SKIP）、observability全部PASS。frontend仅因完整audit FAIL，后续lint/typecheck/unit/build在该job被跳过，其本地结果单独列出。这个head不包含随后新增的下载重试脚本，后续提交须独立复验。
+- [run38575469705](https://github.com/kaii9/codingJudge/actions/runs/38575469705)，head276b892：包含本轮全部运行时/测试修复与下载重试。test（含新脚本单测、真实MinIO构建与完整legacy asset smoke）、microservices（冷编译/取消、三语言、独立部署、真实在途故障与collector）、e2e（14.3s，5 PASS/2设备互斥SKIP）、observability全部PASS；唯一失败步骤仍是frontend的`npm audit --audit-level=high`。源码构建该次未出现已识别的传输错误，不据此声称真实CI触发过重试；重试分支由隔离行为测试验证。后续验收记录更新只改教材/计划，不改变276b892之后的运行时与测试实现。
 
 2026-10-14再次查[官方公告](https://github.com/advisories/GHSA-vfj7-8cjw-p6xm)：braces≤3.0.3受影响，patched versions仍为None。5项high是其开发依赖传递链，不是5个独立已证实的生产漏洞；production-only审计0仅用于诊断。用户选择保持完整审计门槛，因此没有豁免、强制降级不匹配插件、关闭校验或自动合并main。内部业务验收通过不等于整体安全验收完成。
 
