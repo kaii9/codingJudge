@@ -12,10 +12,13 @@
     "prebuild": "npm run prepare:monaco",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint .",
+    "lint": "npm run lint:eslint && npm run lint:next",
+    "lint:eslint": "eslint .",
+    "lint:next": "biome lint .",
     "typecheck": "tsc --noEmit",
     "test": "vitest",
-    "test:run": "vitest run --passWithNoTests",
+    "test:run": "npm run test:lint && vitest run",
+    "test:lint": "node --test tests/lint-contract.test.mjs",
     "test:e2e": "playwright test"
   },
   "dependencies": {
@@ -27,6 +30,7 @@
     "react-dom": "19.2.4"
   },
   "devDependencies": {
+    "@biomejs/biome": "2.5.15",
     "@playwright/test": "^1.61.1",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.2",
@@ -36,10 +40,15 @@
     "@types/react-dom": "^19",
     "@vitejs/plugin-react": "^6.0.3",
     "eslint": "^9",
-    "eslint-config-next": "16.3.8",
+    "eslint-plugin-import": "2.32.0",
+    "eslint-plugin-jsx-a11y": "6.10.2",
+    "eslint-plugin-react": "7.37.5",
+    "eslint-plugin-react-hooks": "7.1.1",
+    "globals": "14.0.0",
     "jsdom": "^26.1.0",
     "playwright": "^1.61.1",
     "typescript": "^5",
+    "typescript-eslint": "8.71.2",
     "vitest": "^4.1.9"
   },
   "overrides": {

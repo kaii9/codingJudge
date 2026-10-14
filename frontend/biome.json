@@ -1,0 +1,22 @@
+{
+  "$schema": "https://biomejs.dev/schemas/2.5.15/schema.json",
+  "files": {
+    "includes": ["**", "!!.next", "!!out", "!!build", "!!public/monaco", "!!node_modules", "!next-env.d.ts"]
+  },
+  "formatter": { "enabled": false },
+  "assist": { "enabled": false },
+  "linter": {
+    "domains": { "next": "all" },
+    "rules": {
+      "preset": "none",
+      "correctness": {
+        "useHookAtTopLevel": "off",
+        "useExhaustiveDependencies": "off",
+        "noNextAsyncClientComponent": "error",
+        "useInlineScriptId": "error"
+      },
+      "performance": { "noSyncScripts": "error" },
+      "suspicious": { "useGoogleFontDisplay": "warn" }
+    }
+  }
+}

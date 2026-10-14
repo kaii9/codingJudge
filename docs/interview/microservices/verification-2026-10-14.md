@@ -4,6 +4,8 @@
 
 ## mTLS追加验证（2026-10-14）
 
+后续前端审计处理见[工具链安全迁移](07-frontend-dependency-security.md)：移除引入 braces 的 Next lint 插件链，保留完整审计门槛，记录规则差异与本次验证。下文的 audit FAIL 是对应历史 head 的实际结果，不删除、不自动改写为 PASS。
+
 用户要求继续开发后，核对发现已实现TLS选项只有配置单测，缺少真实握手证据。本次以d75f825为基础，补齐[既有能力验证计划](../../superpowers/plans/2026-10-14-mtls-verification.md)，不新增服务或生产业务，不改运行时TLS/授权实现。
 
 - 3组`TestMTLS*`真实loopback TCP/gRPC测试连续10轮通过，无SKIP；覆盖8种客户端/协议拒绝、过期服务器证书与正向对照、Judge/Executor两个真实业务RPC适配器。

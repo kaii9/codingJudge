@@ -123,6 +123,7 @@ jobs:
       - run: npm audit --audit-level=high
       - run: npm run lint
       - run: npm run typecheck
+      # test:run also executes real ESLint/Biome negative-fixture contracts.
       - run: npm run test:run
       - run: npm run build
 
