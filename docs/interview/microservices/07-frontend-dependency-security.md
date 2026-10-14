@@ -87,7 +87,7 @@ API_INTERNAL_URL=http://127.0.0.1:28080 npm run start -- --hostname 127.0.0.1 --
 PLAYWRIGHT_BASE_URL=http://127.0.0.1:23011 npm run test:e2e -- --workers=1 --repeat-each=2
 ```
 
-本地完整重装后 audit 0、lint/typecheck/unit/build 通过；浏览器两轮 10 PASS、4 设备互斥 SKIP，Go/C++/Python 实际 AC，不是 mock 结果。远程以[收尾分支对应提交的 CI](https://github.com/kaii9/codingJudge/actions?query=branch%3Afeat%2Fgojudge-interview-closeout)为准，不能拿上一个仍 audit 失败的 head 冒充本次完成，也不能把本地通过等同远程通过。历史失败保留在[原验收记录](verification-2026-10-14.md)。
+当时本地完整重装后audit 0、lint/typecheck/unit/build通过；浏览器两轮10 PASS、4设备互斥SKIP，Go/C++/Python实际AC，不是mock结果。这是迁移阶段的本地证据，不能替代远程CI。后续已核对主线`db054d9`的[run38628695453](https://github.com/kaii9/codingJudge/actions/runs/38628695453)：完整audit 0、25项lint契约、183项应用单测及五个job通过。历史失败保留在[原验收记录](verification-2026-10-14.md)，版本区分见[2026-10-15记录](verification-2026-10-15.md)。
 
 首次远程完整验收：[run 38601178490](https://github.com/kaii9/codingJudge/actions/runs/38601178490)，head `345c03e`，frontend/test/microservices/e2e/observability 五个 job 全部成功。Linux Node 22 的 clean install、完整 audit、两套 lint、24 项契约、183 项单测和 build 均通过；实际三语言浏览器、mTLS、冷编译/取消、故障恢复、数据库边界及 collector 验证亦通过。独立 review 无 Critical/Important；随后修正转义外部模板误报，并加强 warning 级别契约（25 项），不改变运行时或依赖锁。后续提交应核对其自己的 run，不能把 `345c03e` 的报告冒充后续代码的验证。
 

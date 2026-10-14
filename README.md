@@ -19,25 +19,27 @@ Executor: authenticated internal Go sandbox service
 Storage: MinIO for object-backed test cases and submission artifacts
 Frontend: Next.js + React + Monaco Editor
 Deploy: Docker Compose
-CI/CD: GitHub Actions
+CI: GitHub Actions（当前没有自动发布到生产的 CD）
 Docs: OpenAPI
 Observability: slog + Prometheus + Grafana
 ```
 
 ## Resume and Interview Guide
 
-微服务模式面试请先读 [新版分章教材](docs/interview/microservices/README.md)：架构与各功能调用链、Outbox/租约/fencing 故障窗口、gRPC/追踪、测试与演示、24 个追问和简历表述。下面两份早期简历/手册主要描述旧 HTTP 模式，历史压测不能当作微服务新拓扑结果。
+文档总入口为 [文档版本与学习导航](docs/README.md)。微服务模式面试请先读 [新版八章教材](docs/interview/microservices/README.md)：架构与各功能调用链、Outbox/租约/fencing 故障窗口、gRPC/追踪、测试与演示、24 个追问和简历表述。旧 HTTP 教材与历史证据分区保留，不作为新模式主链路或性能依据。
 
-原完整前端审计阻断已解决，现已补齐带鉴权的 Judge RPC readiness、共享超时预算和脱敏失败诊断；源码版本 `1f1715f` 的五项远程 CI 全部通过。结果、对应版本及生产边界见 [2026-10-15 验收记录](docs/interview/microservices/verification-2026-10-15.md)，机制讲解见 [就绪检查与安全RPC排障](docs/interview/microservices/08-readiness-rpc-diagnostics.md)。历史失败保留，后续文档提交按自身 head 核对 CI。
+原完整前端审计阻断已解决，现已补齐带鉴权的Judge RPC readiness、共享超时预算和脱敏失败诊断；已验证主线代码版本`db054d9`的五项远程CI全部通过。结果、对应版本及生产边界见[2026-10-15验收记录](docs/interview/microservices/verification-2026-10-15.md)，机制讲解见[就绪检查与安全RPC排障](docs/interview/microservices/08-readiness-rpc-diagnostics.md)。历史失败保留，后续文档提交按自身head核对CI。
 
 求职材料按“先使用、再理解、后深挖”组织，建议不要一次性通读所有长文：
 
 | 顺序 | 材料 | 用途 |
 | ---: | --- | --- |
-| 1 | [简历项目说明](docs/codingjudge-resume-project.md) | 直接选用三至五条简历描述，准备 1/3/5 分钟项目介绍 |
-| 2 | [面试问答手册](docs/codingjudge-interview-handbook.md) | 按可靠性、并发正确性、沙箱和故障场景准备追问 |
-| 3 | [完整源码教程](docs/codingjudge-complete-tutorial.md) | 把回答对应到真实请求链路、源码入口与测试证据 |
+| 1 | [新版学习路线](docs/interview/microservices/README.md) | 按架构、可靠性、RPC、测试和排障顺序理解当前微服务实现 |
+| 2 | [新版简历与面试问答](docs/interview/microservices/05-interview-resume.md) | 选择简历描述，准备 1/3/5 分钟介绍和追问 |
+| 3 | [测试与演示](docs/interview/microservices/04-tests-ci-demo.md)、[部署指南](docs/microservices-guide.md) | 亲自复现提交、独立部署与失效恢复，再核对版本化验收 |
 | 4 | [PostgreSQL vs MySQL](docs/postgresql-vs-mysql-for-mysql-users.md) | 已熟悉 MySQL 时，准备项目为何选 PostgreSQL 以及如何迁移的追问 |
+
+旧模式对照资料：[旧简历说明](docs/codingjudge-resume-project.md)、[旧问答手册](docs/codingjudge-interview-handbook.md)、[旧完整教学](docs/codingjudge-complete-tutorial.md)。它们保留原链路和历史背景，不直接复制为微服务项目描述。
 
 简历只陈述已有源码、测试或基准报告可自证的能力。本地固定负载和拓扑实验不等于生产 QPS，Docker 沙箱也不等于强多租户安全边界。
 

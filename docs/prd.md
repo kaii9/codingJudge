@@ -1,5 +1,7 @@
 # GoJudge PRD
 
+> 历史需求资料（2026-10-15整理）：本文保留初期MVP的需求、非目标和Future设想，不是当前功能清单。部分Future后来已实现，早期Worker直接运行Docker等描述已演进；当前微服务边界请看[第1章](interview/microservices/01-architecture-call-chains.md)，实现/验收状态见[文档入口](README.md)。不据本页推断当前欠交功能或安全权限。
+
 ## 1. Product Summary
 
 GoJudge 是一个面向简历和 GitHub 展示的在线代码评测系统。它的产品形态是题库、代码提交、异步判题、结果查询和后续排行榜，但核心技术价值是安全地运行不可信代码。

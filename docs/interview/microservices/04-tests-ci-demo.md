@@ -100,9 +100,13 @@ Monaco 的 textarea 是虚拟输入缓冲区，“选中了 textarea 全文”�
 
 [工作流](../../../.github/workflows/ci.yml) 由 push/pull_request 触发，五个 job 分别验证后端、微服务、前端、观测配置、浏览器 E2E。每个 runner 是隔离临时环境，不依赖作者电脑缓存。当前没有自动发布到生产主机的 CD 流程，不能把 Compose 在 CI 启动称为上线。
 
-本次 main 首次远程 [run 38505707075](https://github.com/kaii9/codingJudge/actions/runs/38505707075) 暴露两类问题：原 MinIO 镜像新 runner 无法拉取；npm audit 发现新披露漏洞。验证入口有效，但结果是红灯，不能拿观测配置单个 job 成功替代全流程通过。
+历史首次 main [run 38505707075](https://github.com/kaii9/codingJudge/actions/runs/38505707075) 暴露两类问题：原MinIO镜像新runner无法拉取；npm audit发现新披露漏洞。当时结果是红灯，不能拿观测配置单个job成功替代全流程通过；这不是当前阻断状态。
 
-处理方式：从原官方 MinIO 源码 commit `0d7408fc9969caf07de6a8c3a84f9fbb10a6739e` 重建演示镜像，保留版本/卷；升级可修复前端依赖，不执行 `npm audit fix --force` 强制降级 Next ESLint。2026-10-14 剩余 braces≤3.0.3 未有修复版本，5 项高危报告来自其传递链；用户决定不放行，原 `--audit-level=high` 保留。[braces 官方公告](https://github.com/advisories/GHSA-vfj7-8cjw-p6xm)
+当时处理：从原官方MinIO源码commit `0d7408fc9969caf07de6a8c3a84f9fbb10a6739e` 重建演示镜像，保留版本/卷；升级可修复前端依赖，不执行 `npm audit fix --force` 强制降级Next ESLint。2026-10-14当时剩余braces≤3.0.3未有修复版本，5项高危报告来自其传递链；用户决定不放行，原 `--audit-level=high` 保留。[当时对应公告](https://github.com/advisories/GHSA-vfj7-8cjw-p6xm)
+
+后续结果：移除引入braces的lint依赖链，以ESLint/Biome及真实负向契约保持检查覆盖，没有审计豁免或omit-dev；已验证主线`db054d9`的完整audit为0、五项job通过。具体迁移与差异见[第7章](07-frontend-dependency-security.md)，版本化结果见[验收记录](verification-2026-10-15.md)。后续head仍需自己的CI，audit 0不代表所有依赖长期受维护或没有其他安全风险。
+
+microservices job还显式运行带鉴权Judge readiness和脱敏RPC诊断的race测试，覆盖就绪装配、总预算、错误身份、停服及敏感错误不进入新增日志，见[第8章](08-readiness-rpc-diagnostics.md)。不能把这些测试说成全系统日志/trace安全审计。
 
 两次源码构建还遇到校验服务器瞬时HTTP/2错误；辅助脚本仅对已列举传输错误最多重试3次，checksum mismatch/SECURITY ERROR仍立即失败。这不会豁免漏洞，也不是业务执行RPC的重放策略，具体测试与边界见[第6章](06-debugging-compiler-e2e.md)。
 

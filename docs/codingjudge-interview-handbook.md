@@ -1,6 +1,6 @@
-# GoJudge 面试问答手册
+# GoJudge 面试问答手册：旧 HTTP 模式对照
 
-> 版本说明（2026-10-14）：本手册主要讲旧 HTTP 部署。新微服务模式的数据库归属、gRPC、快照、完成事件/排行榜投影、追踪和故障演示请读 [新版分章教材](interview/microservices/README.md)。两套链路不要混用；旧 cap-drop ALL 描述也不适用于当前可信运行包装器所需的 SETUID/SETGID 权限。
+> 版本说明（2026-10-15整理）：本手册讲旧 HTTP 部署，正文“当前”限定在旧模式/当时写作范围。新微服务的数据归属、gRPC、快照、完成事件投影、追踪和故障演示请读 [新版八章教材](interview/microservices/README.md)，资料分类见 [文档入口](README.md)。两套链路不要混用；源码链接不是冻结的历史版本，旧cap-drop ALL描述也不适用于当前可信运行包装器所需的SETUID/SETGID。
 
 > 使用方式：先背“简短回答”，再理解“完整回答”，最后能指向“源码依据”。面试官继续深入时，从“常见追问”展开。
 >
@@ -829,7 +829,7 @@ HTTP route 使用 chi 模板，例如 `/submissions/{id}`；结果、语言和�
 
 **完整回答**
 
-当前 k6 使用 1 req/s、2 分钟、1/2/4 Worker，证明多 Worker 在相同压力下改善 Judge P95。它不能证明系统最大 QPS或线性扩展。
+历史k6使用1 req/s、2分钟、1/2/4 Worker；对应报告的Judge P95约824–827ms，低负载下相近，说明稳定性而非扩容改善。它不能证明最大QPS或线性扩展；改变Worker数量但未使其饱和，不足以测出容量增益。
 
 **源码依据**
 
@@ -846,11 +846,11 @@ HTTP route 使用 chi 模板，例如 `/submissions/{id}`；结果、语言和�
 
 **简短回答**
 
-Python 固定负载下 Judge P95 从 1 Worker 的 9.49s 降到 4 Worker 的 0.84s；另一组受控饱和实验中，双 Executor 共享 daemon 的中位吞吐是单 Executor 的 1.50 倍。
+历史Python固定负载报告中，1/2/4 Worker的Judge P95为824.00/827.05/826.10ms，没有测出延迟改善；另一组独立的受控饱和实验中，双Executor共享daemon的中位吞吐是单Executor的1.50倍。两组负载和拓扑不同，不能混为一组数据。
 
 **完整回答**
 
-第一组数据说明 API 与判题解耦，并发 Worker 降低排队延迟。第二组使用 540/540 个 AC 任务比较 Executor/daemon 拓扑，显示增加 Executor 槽位有收益，但同一 Docker Desktop VM 内独立 daemon 没有超过 shared daemon。两组都只覆盖本机 Python workload，不能外推生产容量或编译型语言性能。
+第一组是在一个Worker也未饱和的低固定负载下验证稳定性，不能仅从此表证明并发Worker降低排队延迟。第二组使用540/540个AC任务比较Executor/daemon拓扑，显示该实验中增加Executor槽位有收益，但同一Docker Desktop VM内独立daemon没有超过shared daemon。两组只覆盖各自报告的本机Python workload，不能外推生产容量或编译型语言性能。旧教材原9.49s→0.84s引用与所链接报告不一致，本次纠正教材，未修改原始测量报告。
 
 **源码依据**
 

@@ -1,12 +1,12 @@
-# GoJudge 简历项目说明
+# GoJudge 简历项目说明：旧 HTTP 模式对照
 
-> 版本说明（2026-10-14）：本文保留旧 HTTP 部署与历史基准。当前微服务简历和 1/3/5 分钟介绍请优先使用 [新版面试与简历章节](interview/microservices/05-interview-resume.md)，学习路径见 [分章教材入口](interview/microservices/README.md)。不要将历史拓扑数字归因于新增 gRPC/分库改造，也不要把旧全部 cap-drop ALL 的陈述套在当前运行包装器上。
+> 版本说明（2026-10-15整理）：本文保留旧 HTTP 部署与历史基准，正文“当前”限定在旧模式/当时写作范围。当前微服务简历和 1/3/5 分钟介绍请使用 [新版面试与简历章节](interview/microservices/05-interview-resume.md)，资料分类见 [文档入口](README.md)。旧源码链接不是冻结的历史版本；不要把旧拓扑数字归因于gRPC/分库，也不要把旧cap-drop ALL陈述套在当前可信运行包装器上。性能数字必须与原报告逐项核对。
 
-> 用途：从当前真实实现中提炼简历表述、项目介绍和可自证数据。
+> 用途：对照旧部署的简历组织方式、项目介绍和历史实验，不替代新版微服务表述。
 >
 > 原则：只写仓库已经实现且能够通过源码、测试、监控或基准报告证明的内容，不把固定负载延迟测试包装成最大吞吐测试。
 
-**推荐用法：** 中级 Go 后端岗位直接使用第 5 节的五条版本；面试前先熟练第 6–8 节的 1/3/5 分钟口述，再用第 9–14 节校验数据和事实边界。
+**阅读用法：** 只有介绍旧 HTTP 模式时才参考第5节及第6–8节口述。准备当前项目，请优先新版第5章；本页性能引用必须与原报告核对，不将固定负载稳定性说成扩容增益。
 
 ## 1. 项目定位
 
@@ -90,7 +90,7 @@ GoJudge 在线代码评测系统（个人项目）
 - 使用 Redis Streams Consumer Group 分发任务，结果写库成功后才执行 XACK；通过 XAUTOCLAIM 恢复崩溃 Worker 的 Pending 消息，基础设施错误最多重试 3 次后进入死信流。
 - 使用 PostgreSQL SELECT FOR UPDATE、30 秒租约、10 秒心跳和随机 fencing token 管理 Worker 所有权；结果写入携带 token 和 lease 条件，防止重复消息或旧 Worker 覆盖新结果。
 - Docker 运行阶段启用 network none、CPU/内存/PID 限制、只读根文件系统、cap-drop ALL、no-new-privileges 和输出截断；Go/C++ 采用独立编译阶段并复用产物执行多个测试用例。
-- 接入 16 类业务指标，Prometheus 通过 Docker DNS 自动发现扩容 Worker，Grafana 预配置 API、Queue、Worker 和 Judge 面板；k6 固定 1 req/s 条件下，1/2/4 Worker 的 Judge P95 分别为 9.49s、3.13s、0.84s，三轮均为 121 次创建和接受，HTTP/逻辑失败及 dropped iterations 均为 0。
+- 接入业务指标与Grafana面板；历史k6 Python固定1 req/s实验中，1/2/4 Worker的Judge P95分别为824.00/827.05/826.10ms，HTTP/逻辑失败及dropped iterations均为0。这组低负载结果说明稳定性，不证明扩容降低延迟；数据以原实验报告为准。
 - 实现单/双 Executor 及独立 Docker daemon 的可复现拓扑实验；540/540 个测量任务全部 AC，同机中位吞吐从 4.267/s 提升到双 Executor 共享 daemon 的 6.390/s，同时明确该结果不能外推为生产容量。
 - 使用 Go testing、race detector、PostgreSQL/Redis integration tests、Worker 故障接管脚本和 GitHub Actions覆盖核心状态机、租约接管、沙箱参数、指标和外部组件交互。
 ```
@@ -181,17 +181,18 @@ Worker：1 / 2 / 4
 环境：macOS arm64 + Docker Desktop
 ```
 
-结果：
+报告内Date为2026-09-07、commit `3699f85`且Git tree为dirty，不能仅凭文件名推断实验日期或宣称来自clean head。结果以该报告的测量口径为准：
 
-| Worker | Created | Accepted | Judge P95 | HTTP P95 | HTTP failure | Logical failure | Dropped |
-| 1 | 121 | 121 | 9489ms | 19.18ms | 0 | 0 | 0 |
-| 2 | 121 | 121 | 3125ms | 17.94ms | 0 | 0 | 0 |
-| 4 | 121 | 121 | 837ms | 5.37ms | 0 | 0 | 0 |
+| Worker | Created/s | Accepted/s | Judge P95 | HTTP P95 | HTTP failure | Logical failure |
+| --- | --- | --- | --- | --- | --- | --- |
+| 1 | 1.00 | 1.00 | 824.00ms | 4.99ms | 0.0000% | 0.0000% |
+| 2 | 1.00 | 1.00 | 827.05ms | 5.17ms | 0.0000% | 0.0000% |
+| 4 | 1.00 | 1.00 | 826.10ms | 5.70ms | 0.0000% | 0.0000% |
 
 这组数据只能支持：
 
-- 相同固定负载下，增加 Worker 降低 Judge P95；
-- API 没有被判题同步阻塞；
+- 低固定负载下三种Worker数量都能稳定处理该实验；
+- Judge P95相近，未证明增加Worker带来延迟改善；
 - 测试期间没有失败和 dropped iteration；
 - 每轮结束 Pending 可以归零。
 
@@ -201,6 +202,8 @@ Worker：1 / 2 / 4
 - 生产环境容量；
 - 线性吞吐扩展；
 - Go/C++ 编译型任务在 Linux 上的容量。
+
+文档一致性整理纠正了本页原先的9.49s→0.84s及121次计数陈述，因为它们不能由当前链接的报告支持。原报告数据未改写，也没有把Created/s推算成未经报告的提交总数；其他历史结论仍应按其原始证据核对。
 
 ### 9.2 题库数据
 
@@ -309,7 +312,7 @@ Worker：1 / 2 / 4
 
 推荐写法：
 
-> 使用 constant-arrival-rate 固定负载测试比较 1/2/4 Worker，在本地 Python 场景中 Judge P95 从 9.49s 降至 0.84s，测试期间 HTTP/逻辑失败和 dropped iterations 为 0。
+> 使用constant-arrival-rate固定1 req/s负载比较1/2/4 Worker，历史本地Python实验的Judge P95分别为824.00/827.05/826.10ms，失败及dropped iterations为0；该负载下没有测出扩容增益，不外推最大吞吐或新微服务拓扑性能。
 
 ### 11.5 登录与排行榜
 

@@ -1,5 +1,7 @@
 # GoJudge Development Plan
 
+> 历史阶段计划（2026-10-15整理）：以下Status、Tasks和Acceptance保留原阶段范围，不是当前微服务版本的实时进度或待开发承诺。旧HTTP模式、后续计划与已验证结果分开阅读；当前入口为[文档导航](README.md)，当前微服务教材及验收见[学习路线](interview/microservices/README.md)。
+
 ## Guiding Principle
 
 先跑通安全判题主链路，再扩展持久化、队列、前端和比赛功能。每个阶段都必须保持 API 与 worker 隔离，避免 API 服务执行用户代码。

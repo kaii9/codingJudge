@@ -1,5 +1,7 @@
 # GoJudge 开发计划
 
+> 历史计划资料（2026-10-15整理）：本文保留早期MVP路线与技术设想，不是当前执行计划或欠交清单。原拟goose、Worker直接启动Docker等表述不能替代现有迁移工具和独立Executor实现。当前学习、部署与验收请从[文档入口](README.md)进入；后续微服务边界见[第1章](interview/microservices/01-architecture-call-chains.md)。
+
 ## 目标
 
 构建一个 Go 后端在线代码评测系统，支持题库、代码提交、异步判题、提交记录和后续排行榜。项目核心不是 CRUD，而是安全地运行不可信代码：API 服务只是外壳，Docker sandbox 和独立 judge worker 是主线。

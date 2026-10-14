@@ -1,5 +1,7 @@
 # Worker Saturation and Backlog-Drain Benchmark
 
+> 历史实验（2026-10-15整理）：保留原提交、负载、数据、环境及局限；只证明所列拓扑在该实验下的结果，不是后来微服务/gRPC模式的性能或生产容量验收。资料分类与当前学习入口见[文档导航](../README.md)。
+
 - **Date:** 2026-09-08T14:22:00Z
 - **Git commit:** `ec12d9d` (clean tracked tree)
 - **Host:** Darwin/arm64, 8 logical CPUs, 16 GB memory

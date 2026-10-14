@@ -1,5 +1,7 @@
 # Executor Topology Saturation Benchmark
 
+> 历史实验（2026-10-15整理）：保留原提交、拓扑、测量数据和局限。独立Docker daemon不等于独立物理宿主；本报告的后续建议是当时建议，不是当前欠交清单，也不证明后来的gRPC改造带来同样增益。当前资料分类见[文档入口](../README.md)。
+
 ## Technical summary
 
 The independent-daemon topology delivered 0.94x versus the shared-daemon topology and 1.40x versus the single-executor baseline on this recorded host. Adding a second executor while retaining one daemon produced 1.50x the baseline throughput. These are descriptive local measurements, not production capacity claims.

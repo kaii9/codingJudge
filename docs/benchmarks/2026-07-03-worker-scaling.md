@@ -1,5 +1,7 @@
 # Fixed-Load Worker Scaling Benchmark
 
+> 历史实验（2026-10-15整理）：数据、Date、commit、环境与局限原样保留。文件名日期不替代正文Date；本实验不是后来微服务/gRPC拓扑的性能证明，也不代表生产容量。引用数值以本报告为准，不沿用旧教材里未匹配的阶段性数字；资料分类见[文档入口](../README.md)。
+
 **Date:** 2026-09-07T16:40:28Z
 
 ## Environment
