@@ -14,6 +14,8 @@
 
 业务测试使用MemoryStore和计数Runner，不在这组测试中运行Docker/真实PostgreSQL；真实的是TLS/gRPC及生产RPC适配器。不能由此宣称默认Compose已部署mTLS、生产证书ACL/轮换/吊销或跨主机PKI验收完成。教学见[3.6.1](03-grpc-tracing.md#361-真实mtls验证tls通过不等于业务授权通过)，完整远程验收按相应新提交的CI判断，不用下方旧head冒充新测试已获远程验证。
 
+[远程run38588571845](https://github.com/kaii9/codingJudge/actions/runs/38588571845)，head7464984：新增显式mTLS race步骤PASS；test/microservices/e2e/observability四个job均PASS，包含完整后端与组件测试、实际判题/独立部署/故障/collector和浏览器验收。唯一失败步骤仍是frontend的`npm audit --audit-level=high`，没有将这个失败隐藏或排除。后续仅文档更新不改变本轮测试与运行时实现。
+
 `braces`再次核对仍为3.0.3、上游未有patched版本；完整审计门槛保持，因此收尾分支仍不自动合并。新增mTLS测试不能消除或豁免该独立依赖漏洞。[官方公告](https://github.com/advisories/GHSA-vfj7-8cjw-p6xm)
 
 ## 继续验收更新（2026-10-14晚间）

@@ -19,3 +19,5 @@
 ## 本地执行结果
 
 2026-10-14：新增3组真实测试首跑通过，10轮重复通过，无SKIP；选定3包race、完整Go suite、vet通过。现有TLS/业务授权运行时实现没有更改。加入独立CI race步骤与教材3.6.1，远程结果按新提交对应run核对，完整audit保持原门槛。具体测试范围及非生产边界见[验收记录](../../interview/microservices/verification-2026-10-14.md)。
+
+远程验收：7464984对应run38588571845，新mTLS race步骤与test/microservices/e2e/observability全部PASS；唯一失败仍为原完整前端audit。此验证阶段完成，审计阻断保持，不合并收尾分支。未改变任何运行时TLS策略，也没有实现跨主机PKI、轮换或吊销。
