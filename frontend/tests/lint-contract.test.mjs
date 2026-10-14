@@ -35,7 +35,7 @@ for (const [name, source, rule] of rejected) {
 test("accessibility and effect-dependency warnings remain visible", async () => {
   const [result] = await eslint.lintText('import { useEffect } from "react"; export default function Page({ value }: { value: string }) { useEffect(() => console.log(value), []); return <img src="/icon.png" />; }', { filePath: "app/lint-contract.tsx" });
   for (const rule of ["jsx-a11y/alt-text", "react-hooks/exhaustive-deps"]) {
-    assert.ok(result.messages.some(message => message.ruleId === rule && message.severity >= 1), JSON.stringify(result.messages));
+    assert.ok(result.messages.some(message => message.ruleId === rule && message.severity === 1), JSON.stringify(result.messages));
   }
 });
 
@@ -88,10 +88,16 @@ for (const [name, source, rule] of [
   test(`Next lint reports ${name}`, () => {
     const result = biomeLint(source);
     assert.match(result.output, new RegExp(rule));
+    assert.equal(result.status, 0, result.output);
   });
 }
 
 test("valid App Router navigation, downloads and external links are accepted", async () => {
   const [result] = await eslint.lintText('import Link from "next/link"; export default function Page({ id }: { id: string }) { return <><Link href="/submissions">History</Link><a href="/file.zip" download>Download</a><a href="https://example.com">External</a><a href="#section">Section</a><a href="//example.com">External</a><a href="mailto:test@example.com">Mail</a><a href={`https://example.com/${id}/profile`}>External</a></>; }', { filePath: "app/lint-contract.tsx" });
+  assert.equal(result.errorCount, 0, JSON.stringify(result.messages));
+});
+
+test("escaped external URL templates are accepted", async () => {
+  const [result] = await eslint.lintText('export default function Page() { return <a href={`\\x68ttps://example.com`}>External</a>; }', { filePath: "app/lint-contract.tsx" });
   assert.equal(result.errorCount, 0, JSON.stringify(result.messages));
 });

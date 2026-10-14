@@ -45,7 +45,7 @@ const eslintConfig = defineConfig([
         { selector: "VariableDeclarator[id.name='module']", message: "Do not declare Next's reserved module variable." },
         { selector: `${internalAnchor}:has(JSXAttribute[name.name='href'] > Literal[value=${internalPath}])`, message: "Use next/link for internal navigation (download links are allowed)." },
         { selector: `${internalAnchor}:has(JSXAttribute[name.name='href'] > JSXExpressionContainer > Literal[value=${internalPath}])`, message: "Use next/link for internal navigation (download links are allowed)." },
-        { selector: `${internalAnchor}:has(JSXAttribute[name.name='href'] > JSXExpressionContainer > TemplateLiteral > TemplateElement:first-child[value.raw=${internalPath}])`, message: "Use next/link for internal navigation (download links are allowed)." },
+        { selector: `${internalAnchor}:has(JSXAttribute[name.name='href'] > JSXExpressionContainer > TemplateLiteral > TemplateElement:first-child[value.cooked=${internalPath}])`, message: "Use next/link for internal navigation (download links are allowed)." },
       ],
     },
   },

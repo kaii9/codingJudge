@@ -52,7 +52,7 @@ Next、React、Monaco 等运行时版本不变。移除 eslint-config-next 后�
 | next-script-for-ga / no-css-tags / no-location-assign-relative-destination / no-page-custom-font | 没有一对一替代；原为 warning。当前代码不使用这些模式；引入手写第三方脚本、stylesheet、location.assign 或外链字体时须专门 review，而不能宣称 lint 自动兜底 |
 | no-styled-jsx-in-document / no-title-in-document-head / no-typos | Pages Router 特有路径没有单独复刻。本项目不使用 pages/_document 或 getStaticProps/getServerSideProps；增加 Pages Router 必须重新评估规则，不能沿用本表声称兼容 |
 
-链接检查是静态质量约束，不是运行时 URL 安全验证：任意变量的 href、运行时拼接、JSX spread 无法在这里可靠求值；模板只判断第一个静态片段，不错误地拦截外部 URL 的后续路径。本项目约定站内导航包括新窗口导航也使用 Link，比旧插件允许部分 target=_blank 更严格。
+链接检查是静态质量约束，不是运行时 URL 安全验证：任意变量的 href、运行时拼接、JSX spread 无法在这里可靠求值；模板只判断第一个经过转义解码的静态片段，不错误地拦截外部 URL 的后续路径或合法转义。本项目约定站内导航包括新窗口导航也使用 Link，比旧插件允许部分 target=_blank 更严格。
 
 配置入口：[ESLint](../../../frontend/eslint.config.mjs)、[Biome](../../../frontend/biome.json)、[依赖和命令](../../../frontend/package.json)。没有关闭格式要求来掩盖代码问题：本项目此前没有 formatter gate，本次只迁移 lint，不做全库格式重写。
 
@@ -61,8 +61,8 @@ Next、React、Monaco 等运行时版本不变。移除 eslint-config-next 后�
 [lint 契约测试](../../../frontend/tests/lint-contract.test.mjs)运行真实工具和仓库配置，不 mock 规则、不 grep 配置源码：
 
 - 错误代码：条件调用 Hook、render 中 setState、列表缺 key、显式 any、内部原生 a 导航、module 变量、旧 Document/Head 导入、同步脚本、没有 id 的 Next Script、async Client Component。
-- 正向对照：Link、下载、外部链接和带插值的外部 URL、async Server Component、正常 Client Component、有 id 的 Script、defer 脚本。
-- warning 仍可见：effect 缺依赖、img 缺 alt、普通 img、重复 polyfill、Google Fonts display。
+- 正向对照：Link、下载、外部链接和带插值/转义的外部 URL、async Server Component、正常 Client Component、有 id 的 Script、defer 脚本。
+- warning 仍可见且仍为非阻断提示：effect 缺依赖、img 缺 alt、普通 img、重复 polyfill、Google Fonts display；检查 severity 或进程成功退出，防止无意升级成 error。
 
 新增内部链接和外部模板边界测试先失败，修正 selector 后通过；Google Fonts display 在只开 Next domain 时没有提示，显式补齐后通过。同步脚本的 severity 另做降级 mutation 对照，证明仅“有诊断”还不够，必须使进程失败。原来已经存在的 React/Hooks 规则是迁移保护测试，不把其原本通过伪称为业务修复 RED。
 
@@ -88,6 +88,8 @@ PLAYWRIGHT_BASE_URL=http://127.0.0.1:23011 npm run test:e2e -- --workers=1 --rep
 ```
 
 本地完整重装后 audit 0、lint/typecheck/unit/build 通过；浏览器两轮 10 PASS、4 设备互斥 SKIP，Go/C++/Python 实际 AC，不是 mock 结果。远程以[收尾分支对应提交的 CI](https://github.com/kaii9/codingJudge/actions?query=branch%3Afeat%2Fgojudge-interview-closeout)为准，不能拿上一个仍 audit 失败的 head 冒充本次完成，也不能把本地通过等同远程通过。历史失败保留在[原验收记录](verification-2026-10-14.md)。
+
+首次远程完整验收：[run 38601178490](https://github.com/kaii9/codingJudge/actions/runs/38601178490)，head `345c03e`，frontend/test/microservices/e2e/observability 五个 job 全部成功。Linux Node 22 的 clean install、完整 audit、两套 lint、24 项契约、183 项单测和 build 均通过；实际三语言浏览器、mTLS、冷编译/取消、故障恢复、数据库边界及 collector 验证亦通过。独立 review 无 Critical/Important；随后修正转义外部模板误报，并加强 warning 级别契约（25 项），不改变运行时或依赖锁。后续提交应核对其自己的 run，不能把 `345c03e` 的报告冒充后续代码的验证。
 
 ## 5. 维护边界：audit 0 不等于永远安全
 
