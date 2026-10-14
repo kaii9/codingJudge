@@ -21,7 +21,15 @@ import (
 var propagator = propagation.TraceContext{}
 
 func Init(service string) (func(), error) {
-	options := []sdktrace.TracerProviderOption{sdktrace.WithResource(resource.NewSchemaless(attribute.String("service.name", service))), sdktrace.WithSampler(sdktrace.ParentBased(sdktrace.AlwaysSample()))}
+	instance := os.Getenv("EXECUTOR_INSTANCE_ID")
+	if instance == "" {
+		var err error
+		instance, err = os.Hostname()
+		if err != nil {
+			return nil, err
+		}
+	}
+	options := []sdktrace.TracerProviderOption{sdktrace.WithResource(resource.NewSchemaless(attribute.String("service.name", service), attribute.String("service.instance.id", instance))), sdktrace.WithSampler(sdktrace.ParentBased(sdktrace.AlwaysSample()))}
 	if endpoint := os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT"); endpoint != "" {
 		exporter, err := otlptracehttp.New(context.Background(), otlptracehttp.WithEndpointURL(endpoint))
 		if err != nil {

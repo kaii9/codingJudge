@@ -14,6 +14,8 @@ import (
 	judgepkg "github.com/kaii9/codingJudge/internal/judge"
 	"github.com/kaii9/codingJudge/internal/store"
 	"github.com/kaii9/codingJudge/internal/telemetry"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
 )
 
 var (
@@ -122,9 +124,15 @@ func (p *Processor) ProcessOne(ctx context.Context) error {
 	return p.ProcessJob(ctx, job)
 }
 
-func (p *Processor) ProcessJob(ctx context.Context, job domain.Job) error {
+func (p *Processor) ProcessJob(ctx context.Context, job domain.Job) (resultErr error) {
 	ctx, span := telemetry.Start(telemetry.Extract(ctx, job.TraceParent), "judge.process")
 	defer span.End()
+	defer func() {
+		if resultErr != nil {
+			span.RecordError(resultErr)
+			span.SetStatus(codes.Error, "judge attempt failed")
+		}
+	}()
 	// Execution and recovery have separate bounded budgets. Keep the parent
 	// cancellation attached so shutdown never starts detached database writes.
 	taskCtx, cancelTask := context.WithTimeout(ctx, p.config.TaskTimeout)
@@ -153,6 +161,7 @@ func (p *Processor) ProcessJob(ctx context.Context, job domain.Job) error {
 		return nil
 	case domain.ClaimAcquired:
 		ctx = telemetry.WithExecutionID(ctx, fmt.Sprintf("%s:attempt-%d", job.SubmissionID, claim.Attempts))
+		span.SetAttributes(attribute.String("gojudge.execution_id", telemetry.ExecutionID(ctx)), attribute.Int("gojudge.attempt", claim.Attempts))
 		taskCtx = telemetry.WithExecutionID(taskCtx, telemetry.ExecutionID(ctx))
 		if p.metrics != nil {
 			p.metrics.WorkerJobStarted()
