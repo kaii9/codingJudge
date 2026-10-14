@@ -172,7 +172,7 @@ func TestDockerCompileArgsSelectCompilerAndWritableWorkspace(t *testing.T) {
 		language domain.Language
 		command  string
 	}{
-		{name: "go", language: domain.LanguageGo, command: "go build -o /workspace/program /workspace/main.go"},
+		{name: "go", language: domain.LanguageGo, command: "go build -p 1 -o /workspace/program /workspace/main.go"},
 		{name: "cpp", language: domain.LanguageCPP, command: "g++ /workspace/main.cpp -O2 -std=c++17 -o /workspace/program"},
 	}
 
@@ -205,6 +205,27 @@ func TestDockerCompileArgsSkipsInterpretedLanguage(t *testing.T) {
 
 	if args, ok := dockerCompileArgs(CompileRequest{Language: domain.LanguagePython}, "/tmp/codingjudge-1"); ok || args != nil {
 		t.Fatalf("python compile args = %#v, %v; want nil, false", args, ok)
+	}
+}
+
+func TestGoCompilerParallelismMatchesSingleCPUSandbox(t *testing.T) {
+	args, ok := dockerCompileArgs(CompileRequest{Language: domain.LanguageGo}, "/tmp/codingjudge-go-budget")
+	if !ok {
+		t.Fatal("missing Go compile stage")
+	}
+	if !containsSubstring(args, "GOMAXPROCS=1") || !containsSubstring(args, "go build -p 1 ") {
+		t.Fatalf("compiler can oversubscribe single CPU: %v", args)
+	}
+	for _, pair := range [][2]string{{"--cpus", "1"}, {"--memory", "512m"}, {"--pids-limit", "64"}, {"--network", "none"}, {"--cap-drop", "ALL"}, {"--security-opt", "no-new-privileges"}, {"--tmpfs", "/tmp:rw,noexec,nosuid,size=64m"}} {
+		if !containsAdjacent(args, pair[0], pair[1]) {
+			t.Fatalf("compile sandbox limit changed: %v", pair)
+		}
+	}
+	if compileTimeout != 30*time.Second {
+		t.Fatal("compile deadline was relaxed")
+	}
+	if containsSubstring(args, "/cache:") {
+		t.Fatal("cross-submission writable cache introduced")
 	}
 }
 

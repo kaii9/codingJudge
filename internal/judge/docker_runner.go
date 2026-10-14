@@ -379,9 +379,12 @@ func languageSpecFor(language domain.Language) (languageSpec, bool) {
 	switch language {
 	case "", domain.LanguageGo:
 		return languageSpec{
-			filename:       "main.go",
-			image:          "golang:1.25-alpine",
-			compileCommand: "GOCACHE=/tmp/go-build HOME=/tmp go build -o /workspace/program /workspace/main.go",
+			filename: "main.go",
+			image:    "golang:1.25-alpine",
+			// The compiler sandbox has one CPU. Bound both package-level
+			// parallelism and compiler/runtime threads instead of depending on
+			// host CPU discovery or Go's minimum GOMAXPROCS for cgroup quotas.
+			compileCommand: "GOMAXPROCS=1 GOCACHE=/tmp/go-build HOME=/tmp go build -p 1 -o /workspace/program /workspace/main.go",
 			runCommand:     "/workspace/program < /workspace/input.txt",
 		}, true
 	case domain.LanguageCPP:

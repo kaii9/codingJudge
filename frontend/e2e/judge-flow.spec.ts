@@ -80,7 +80,11 @@ async function registerTestUser(page: Page, suffix: string) {
 }
 
 test.describe.configure({ mode: "serial" });
-test.setTimeout(60_000);
+// A Go compile alone may use 30s; each case also has bounded Docker lifecycle
+// time. Match the existing Executor RPC budget, not just the compile budget.
+// This is a functional test deadline, not a performance SLO or sandbox limit.
+const verdictTimeoutMs = 120_000;
+test.setTimeout(verdictTimeoutMs + 30_000);
 
 for (const language of acceptedPrograms) {
   test(`submits ${language.label} and reaches Accepted`, async ({ page }) => {
@@ -97,7 +101,7 @@ for (const language of acceptedPrograms) {
     await page.getByRole("button", { name: "Submit" }).click();
     expect((await submitted).postDataJSON()).toMatchObject({ language: language.value, code: enteredCode });
     const status = page.getByRole("tabpanel", { name: "Result" }).getByRole("status");
-    await expect(status).toContainText(/Accepted|Wrong Answer|Compile Error|Runtime Error|Time Limit Exceeded|Internal Error/, { timeout: 30_000 });
+    await expect(status).toContainText(/Accepted|Wrong Answer|Compile Error|Runtime Error|Time Limit Exceeded|Internal Error/, { timeout: verdictTimeoutMs });
     await expect(status).toContainText("Accepted");
 
     await page.getByRole("link", { name: "Submissions" }).click();
