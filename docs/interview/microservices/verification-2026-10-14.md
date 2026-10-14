@@ -1,6 +1,6 @@
 # 2026-10-14 收尾验收记录
 
-这是收尾分支 `feat/gojudge-interview-closeout` 的记录，不表示已合并，也不表示全项绿灯。基础提交 `1cf5ded`；新增实例/attempt tracing、可选Jaeger、固定来源MinIO兼容镜像，修复已应用迁移的空白checksum、编译预算/身份和浏览器输入问题。最终状态以本节更新及对应远程CI版本为准，后文首轮失败记录不删除。
+这是收尾分支 `feat/gojudge-interview-closeout` 当时的历史记录。当前已获用户批准并合并，审计阻断已解决，见 [2026-10-15 主线合并验收](verification-2026-10-15.md)。下文的未合并/FAIL 都只描述其对应历史版本。基础提交 `1cf5ded`；新增实例/attempt tracing、可选Jaeger、固定来源MinIO兼容镜像，修复已应用迁移的空白checksum、编译预算/身份和浏览器输入问题；原失败记录不删除。
 
 ## mTLS追加验证（2026-10-14）
 
