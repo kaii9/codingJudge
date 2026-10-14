@@ -345,7 +345,8 @@ func TestCIWorkflowCoversMinIOObjectStoragePath(t *testing.T) {
 	}
 	body := string(workflow)
 	for _, want := range []string{
-		"minio/minio:",
+		"docker build -f deploy/Dockerfile.minio -t gojudge-minio:2025-04-22 .",
+		"gojudge-minio:2025-04-22 server /data",
 		"TEST_MINIO_ENDPOINT:",
 		"./internal/objectstore",
 		"scripts/smoke-minio-assets.sh",

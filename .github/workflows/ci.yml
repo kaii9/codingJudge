@@ -8,6 +8,8 @@ jobs:
   microservices:
     runs-on: ubuntu-latest
     timeout-minutes: 25
+    env:
+      CJ_MICRO_TRACING: "1"
     permissions:
       contents: read
     steps:
@@ -29,11 +31,13 @@ jobs:
         run: go test -tags integration ./internal/store -run TestMicroservice -count=1
       - name: verify real executions and independent executor rollout
         run: make verify-microservices
+      - name: verify collector-backed cross-service trace
+        run: make verify-microservices-tracing
       - name: verify in-flight executor crash and forced-drain recovery
         run: bash scripts/verify-microservices-faults.sh
       - name: print service logs
         if: failure()
-        run: docker compose -f deploy/compose/microservices.yml logs --no-color
+        run: docker compose -f deploy/compose/microservices.yml -f deploy/compose/microservices-tracing.yml logs --no-color
       - name: stop stack
         if: always()
         run: make microservices-down
@@ -75,11 +79,12 @@ jobs:
           go-version: "1.25"
       - name: start MinIO
         run: |
+          docker build -f deploy/Dockerfile.minio -t gojudge-minio:2025-04-22 .
           docker run -d --name ci-minio \
             -p 9000:9000 \
             -e MINIO_ROOT_USER=minioadmin \
             -e MINIO_ROOT_PASSWORD=minioadmin \
-            minio/minio:RELEASE.2025-04-22T22-12-26Z server /data
+            gojudge-minio:2025-04-22 server /data
           for i in $(seq 1 60); do
             curl -fsS http://localhost:9000/minio/health/ready && exit 0
             sleep 1

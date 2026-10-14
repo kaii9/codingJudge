@@ -207,7 +207,8 @@ services:
       retries: 20
 
   minio:
-    image: minio/minio:RELEASE.2025-04-22T22-12-26Z
+    image: gojudge-minio:2025-04-22
+    build: {context: ., dockerfile: deploy/Dockerfile.minio}
     command: ["server", "/data", "--console-address", ":9001"]
     environment:
       MINIO_ROOT_USER: minioadmin
@@ -218,7 +219,7 @@ services:
     volumes:
       - minio-data:/data
     healthcheck:
-      test: ["CMD", "mc", "ready", "local"]
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:9000/minio/health/ready"]
       interval: 5s
       timeout: 3s
       retries: 20

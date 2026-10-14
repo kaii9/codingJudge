@@ -1,0 +1,13 @@
+# Local/CI compatibility image: rebuild the existing MinIO release from its
+# official source, without upgrading existing data volumes. Not a maintained
+# production distribution; see docs/interview/microservices/04-tests-ci-demo.md.
+FROM golang:1.25-alpine AS build
+ENV CGO_ENABLED=0 GOTOOLCHAIN=local
+RUN go install -trimpath -ldflags="-s -w -X github.com/minio/minio/cmd.Version=2025-04-22T22:12:26Z -X github.com/minio/minio/cmd.ReleaseTag=RELEASE.2025-04-22T22-12-26Z -X github.com/minio/minio/cmd.CommitID=0d7408fc9969caf07de6a8c3a84f9fbb10a6739e" github.com/minio/minio@0d7408fc9969caf07de6a8c3a84f9fbb10a6739e
+
+FROM alpine:3.22
+RUN apk add --no-cache ca-certificates
+COPY --from=build /go/bin/minio /usr/local/bin/minio
+EXPOSE 9000 9001
+ENTRYPOINT ["minio"]
+CMD ["server", "/data"]
