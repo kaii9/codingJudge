@@ -53,7 +53,11 @@ async function fillMonaco(page: Page, language: LanguageCase["value"], code: str
   const input = page.locator(".monaco-editor textarea.inputarea");
   await expect(input).toBeAttached({ timeout: 15_000 });
   await input.click({ force: true });
-  await input.press(process.platform === "darwin" ? "Meta+A" : "Control+A");
+  await expect(input).toBeFocused();
+  // Monaco chooses browser keybindings from navigator.userAgent, not the OS
+  // running Node. Desktop Chrome emulates Windows even on a macOS runner.
+  const selectAll = await page.evaluate(() => navigator.userAgent.includes("Macintosh") ? "Meta+A" : "Control+A");
+  await input.press(selectAll);
   await expect.poll(async () => (await monacoState(page)).selectedAll).toBe(true);
   await page.keyboard.insertText(code);
   // Monaco auto-indents typed multiline Go/C++; those spaces are insignificant.
