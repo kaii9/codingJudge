@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import type * as Monaco from "monaco-editor";
 
 type LanguageCase = {
   label: string;
@@ -28,16 +29,39 @@ function escapeRegExp(value: string) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-async function fillMonaco(page: Page, code: string) {
+async function monacoState(page: Page) {
+  return page.evaluate(() => {
+    const monaco = (window as unknown as { monaco?: typeof Monaco }).monaco;
+    const editor = monaco?.editor.getEditors()[0];
+    const model = editor?.getModel();
+    const selection = editor?.getSelection();
+    return {
+      language: model?.getLanguageId(),
+      code: model?.getValue(),
+      selectedAll: !!model && !!selection
+        && selection.startLineNumber === 1 && selection.startColumn === 1
+        && selection.endLineNumber === model.getLineCount()
+        && selection.endColumn === model.getLineMaxColumn(model.getLineCount()),
+    };
+  });
+}
+
+async function fillMonaco(page: Page, language: LanguageCase["value"], code: string) {
+  // Switching the select schedules a different Monaco model. An attached
+  // textarea (often empty/virtualized) cannot prove the new model is ready.
+  await expect.poll(async () => (await monacoState(page)).language).toBe(language);
   const input = page.locator(".monaco-editor textarea.inputarea");
   await expect(input).toBeAttached({ timeout: 15_000 });
   await input.click({ force: true });
   await input.press(process.platform === "darwin" ? "Meta+A" : "Control+A");
-  await expect.poll(() => input.evaluate(element => {
-    const textarea = element as HTMLTextAreaElement;
-    return textarea.selectionStart === 0 && textarea.selectionEnd === textarea.value.length;
-  })).toBe(true);
+  await expect.poll(async () => (await monacoState(page)).selectedAll).toBe(true);
   await page.keyboard.insertText(code);
+  // Monaco auto-indents typed multiline Go/C++; those spaces are insignificant.
+  // Python indentation is semantic, so retain its exact bytes in this check.
+  const comparable = (value: string | undefined) => language === "python"
+    ? value : value?.replace(/[ \t]/g, "");
+  await expect.poll(async () => comparable((await monacoState(page)).code)).toBe(comparable(code));
+  return (await monacoState(page)).code!;
 }
 
 async function openCodePane(page: Page) {
@@ -66,12 +90,15 @@ for (const language of acceptedPrograms) {
     await expect(page.getByRole("heading", { name: /A\+B/ })).toBeVisible();
     await openCodePane(page);
     await page.getByLabel("Language").selectOption(language.value);
-    await fillMonaco(page, language.code);
+    const enteredCode = await fillMonaco(page, language.value, language.code);
 
+    const submitted = page.waitForRequest(request => request.method() === "POST"
+      && new URL(request.url()).pathname === "/api/submissions");
     await page.getByRole("button", { name: "Submit" }).click();
-    await expect(
-      page.getByRole("tabpanel", { name: "Result" }).getByText("Accepted"),
-    ).toBeVisible({ timeout: 30_000 });
+    expect((await submitted).postDataJSON()).toMatchObject({ language: language.value, code: enteredCode });
+    const status = page.getByRole("tabpanel", { name: "Result" }).getByRole("status");
+    await expect(status).toContainText(/Accepted|Wrong Answer|Compile Error|Runtime Error|Time Limit Exceeded|Internal Error/, { timeout: 30_000 });
+    await expect(status).toContainText("Accepted");
 
     await page.getByRole("link", { name: "Submissions" }).click();
     await expect(
