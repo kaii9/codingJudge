@@ -26,6 +26,8 @@ Observability: slog + Prometheus + Grafana
 
 ## Resume and Interview Guide
 
+微服务模式面试请先读 [新版分章教材](docs/interview/microservices/README.md)：架构与各功能调用链、Outbox/租约/fencing 故障窗口、gRPC/追踪、测试与演示、24 个追问和简历表述。下面两份早期简历/手册主要描述旧 HTTP 模式，历史压测不能当作微服务新拓扑结果。
+
 求职材料按“先使用、再理解、后深挖”组织，建议不要一次性通读所有长文：
 
 | 顺序 | 材料 | 用途 |
@@ -42,6 +44,8 @@ Observability: slog + Prometheus + Grafana
 ## Architecture
 
 新增可选 [微服务部署与验收模式](docs/microservices-guide.md)：平台与判题域使用独立数据库账号，内部使用版本化 gRPC；判题快照、完成事件和排行榜读模型保持可靠性，Executor 支持健康选择、有界等待、取消和独立退出。原有部署路径保留。
+
+本节下方图与根目录 Quick Start 描述旧部署；新模式完整图见 [架构与功能调用链](docs/interview/microservices/01-architecture-call-chains.md)。可选追踪演示运行 `make microservices-tracing-up` 和 `make verify-microservices-tracing`，UI 仅开放到本地 `127.0.0.1:26686`。
 
 ```mermaid
 flowchart LR

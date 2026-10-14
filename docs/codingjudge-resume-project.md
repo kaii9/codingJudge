@@ -1,5 +1,7 @@
 # GoJudge 简历项目说明
 
+> 版本说明（2026-10-14）：本文保留旧 HTTP 部署与历史基准。当前微服务简历和 1/3/5 分钟介绍请优先使用 [新版面试与简历章节](interview/microservices/05-interview-resume.md)，学习路径见 [分章教材入口](interview/microservices/README.md)。不要将历史拓扑数字归因于新增 gRPC/分库改造，也不要把旧全部 cap-drop ALL 的陈述套在当前运行包装器上。
+
 > 用途：从当前真实实现中提炼简历表述、项目介绍和可自证数据。
 >
 > 原则：只写仓库已经实现且能够通过源码、测试、监控或基准报告证明的内容，不把固定负载延迟测试包装成最大吞吐测试。
@@ -93,9 +95,9 @@ GoJudge 在线代码评测系统（个人项目）
 - 使用 Go testing、race detector、PostgreSQL/Redis integration tests、Worker 故障接管脚本和 GitHub Actions覆盖核心状态机、租约接管、沙箱参数、指标和外部组件交互。
 ```
 
-## 5. 推荐最终版本
+## 5. 旧 HTTP 部署推荐版本
 
-如果投递中级 Go 后端，建议使用下面这版。信息密度够高，同时不会让项目描述过长。
+以下适用于旧部署。投递微服务 Go 后端请使用上方链接的新版本，明确三个领域、数据库所有权、gRPC 与结果投影。
 
 ```text
 GoJudge 在线代码评测系统

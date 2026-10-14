@@ -29,7 +29,7 @@ flowchart LR
 
 ```bash
 # 内存受限的 Docker Desktop 建议逐个构建，编译缓存会复用
-for service in platform judge-api worker executor migrate-platform; do
+for service in minio platform judge-api worker executor migrate-platform; do
   docker compose -f deploy/compose/microservices.yml build "$service"
 done
 docker compose -f deploy/compose/microservices.yml up -d --no-build --wait
@@ -37,7 +37,7 @@ bash scripts/verify-microservices.sh
 bash scripts/verify-microservices-faults.sh
 ```
 
-公开 API：`http://localhost:28080`。
+公开 API：`http://localhost:28080`。首次 MinIO 从官方固定源码编译，冷构建较慢；此兼容镜像不代表维护中的生产分发，详见 [测试与 CI 教学](interview/microservices/04-tests-ci-demo.md)。
 
 若 Docker Desktop 中暂停了本项目容器，先用 `docker compose -f deploy/compose/microservices.yml ps` 检查。确认显示 Paused 后，可运行 `docker compose -f deploy/compose/microservices.yml unpause postgres redis minio judge-api platform worker executor executor-b` 恢复本项目；暂停状态下 HTTP 验收请求不会得到响应。
 
@@ -78,7 +78,7 @@ docker compose -f deploy/compose/microservices.yml down
 
 `api/proto/gojudge/executor/v1/executor.proto`：批量执行。
 
-公开 HTTP API 保留。原部署默认使用内部 HTTP，新模式通过 `EXECUTOR_PROTOCOL=grpc` 明确切换。执行客户端禁用 gRPC 自动重试，Worker 负责有界任务 attempt；不使用失败后隐式 HTTP 回退。
+公开 HTTP API 保留。原部署默认使用内部 HTTP，新模式通过 `EXECUTOR_PROTOCOL=grpc` 明确切换。执行客户端不配置执行级 retry policy，Worker 负责有界任务 attempt；不使用失败后隐式 HTTP 回退。gRPC 的透明重试边界见 [调用治理教材](interview/microservices/03-grpc-tracing.md)。
 
 协议增量采用新可选字段；不复用旧字段编号，不改变既有字段含义。冻结 fixture `api/compat/executor/executor-v1.proto` 验证旧客户端调用当前服务。它证明该 fixture 的兼容性，不代表所有未来版本自动兼容。
 
@@ -132,6 +132,8 @@ RPC_TLS_SERVER_NAME=可选的目标服务证书名称（客户端）
 Go 服务使用 OpenTelemetry。HTTP/RPC 创建 span；traceparent 在 judge_outbox 中保存，Relay 写入 Stream，Worker 建立 attempt span，再传播到 Executor。日志记录 traceparent；不记录源码、隐藏测试或凭据。
 
 设置 `OTEL_EXPORTER_OTLP_ENDPOINT=http://collector:4318` 可导出到兼容 OTLP/HTTP 的 Collector/Jaeger。未配置时仍生成并传递 trace context，但不导出 span。不要把这一状态描述为已经部署追踪后端。
+
+可选真实追踪演示：`make microservices-tracing-up`、`make verify-microservices-tracing`；UI 为 `http://127.0.0.1:26686`，内存存储重启后丢失。运行 smoke/fault 等会重建 Executor 的脚本时使用 `CJ_MICRO_TRACING=1` 保留 overlay。完整面试教材见 [学习入口](interview/microservices/README.md)。
 
 ## 测试
 
